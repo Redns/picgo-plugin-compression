@@ -30,6 +30,6 @@
   },
   "dependencies": {
     "request": "^2.88.2",
-    "superagent": "^7.1.1"
+    "superagent": "^7.1.2"
   }
 }
