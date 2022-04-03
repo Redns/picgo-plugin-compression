@@ -42,5 +42,8 @@
 
 4. 点击 `确定`，设置完成
 
+<br>
 
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Redns/picgo-plugin-compression&type=Date)](https://star-history.com/#Redns/picgo-plugin-compression&Date)
 
