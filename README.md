@@ -1,6 +1,6 @@
 # picgo-plugin-compression
 
-![](https://img.shields.io/badge/release-v1.1.5-green) ![](https://img.shields.io/badge/License-MIT-blue)
+![](https://img.shields.io/badge/release-v1.1.6-green) ![](https://img.shields.io/badge/License-MIT-blue)
 
 ## 简介
 

@@ -1,5 +1,3 @@
-const qs = require('qs')
-
 const pluginConfig = (ctx) => {
     let userConfig = ctx.getConfig('picgo-plugin-compression')
     if (!userConfig) {
@@ -55,15 +53,6 @@ const uploadRequestConstruct = (filename, imgSrc) => {
  * @returns 
  */
 const compressRequestConstruct = (id, filename, accept_lossy, jpeg_quality) => {
-    let data = qs.stringify({
-        'action': 'compress',
-        'srcid': id,
-        'srcname': filename,
-        'param_limit_width': 'origin',
-        'param_accept_lossy': accept_lossy,
-        'param_jpeg_quality': jpeg_quality 
-    });
-
     return {
         method: 'post',
         url: 'https://www.secaibi.com/designtools/api/resizer-action',
@@ -72,7 +61,7 @@ const compressRequestConstruct = (id, filename, accept_lossy, jpeg_quality) => {
             'Referer': 'https://www.secaibi.com/designtools/media/pages/resizer.html',
             'Content-Type': 'application/x-www-form-urlencoded'
         },
-        data: data
+        data: `action=compress&srcid=${id}&srcname=${filename}&param_limit_width=origin&param_accept_lossy=${accept_lossy}&param_jpeg_quality=${jpeg_quality}`
     }
 }
 
@@ -90,7 +79,6 @@ const compressResultRequestConstruct = (dstid, filename) => {
         url: `https://www.secaibi.com/designtools/api/image/${dstid}.bin?filename=${filename}`,
         headers: { 
             'Referer': 'https://www.secaibi.com/designtools/media/pages/resizer.html', 
-            //'Accept': 'application/octet-stream'
         },
         responseType: 'arraybuffer'
     }
@@ -136,7 +124,6 @@ const handle = async (ctx) => {
                 await ctx.request(compressRequest).then(async (compressResponse) => {
                     if(compressResponse.success && (compressResponse.srcsize > compressResponse.dstsize)){
                         // 下载压缩后的图片
-                        // ctx.log.info(`https://www.secaibi.com/designtools/api/image/${compressResponse.dstid}.bin?filename=${imgList[i].filename}`)
                         const compressResultRequest = compressResultRequestConstruct(compressResponse.dstid, imgList[i].filename)
                         await ctx.request(compressResultRequest).then(async (compressResultResponse) => {
                             imgList[i].buffer = Buffer.from(compressResultResponse, 'hex')
