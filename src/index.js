@@ -1,4 +1,4 @@
-var superagent = require('superagent')
+const qs = require('qs')
 
 const pluginConfig = (ctx) => {
     let userConfig = ctx.getConfig('picgo-plugin-compression')
@@ -35,13 +35,13 @@ const pluginConfig = (ctx) => {
  */
 const uploadRequestConstruct = (filename, imgSrc) => {
     return {
-        'method': 'POST',
-        'url': 'https://www.secaibi.com/designtools/api/image.html?tag=resizer&restful_override_method=PUT&qqfile=' + filename,
-        'headers': {
-        'Origin': 'https://www.secaibi.com',
-        'Content-Type': 'application/octet-stream'
+        method: 'post',
+        url: `https://www.secaibi.com/designtools/api/image.html?tag=resizer&restful_override_method=PUT&qqfile=${filename}`,
+        headers: {
+            'Origin': 'https://www.secaibi.com',
+            'Content-Type': 'application/octet-stream'
         },
-        body: imgSrc
+        data: imgSrc
     }
 }
 
@@ -54,23 +54,45 @@ const uploadRequestConstruct = (filename, imgSrc) => {
  * @param {JPG压缩质量} jpeg_quality 
  * @returns 
  */
-const compressionRequestConstruct = (srcid, filename, accept_lossy, jpeg_quality) => {
+const compressRequestConstruct = (id, filename, accept_lossy, jpeg_quality) => {
+    let data = qs.stringify({
+        'action': 'compress',
+        'srcid': id,
+        'srcname': filename,
+        'param_limit_width': 'origin',
+        'param_accept_lossy': accept_lossy,
+        'param_jpeg_quality': jpeg_quality 
+    });
+
     return {
-        'method': 'POST',
-        'url': 'https://www.secaibi.com/designtools/api/resizer-action',
-        'headers': {
-        'Origin': 'https://www.secaibi.com',
-        'Referer': 'https://www.secaibi.com/designtools/media/pages/resizer.html',
-        'Content-Type': 'application/x-www-form-urlencoded'
+        method: 'post',
+        url: 'https://www.secaibi.com/designtools/api/resizer-action',
+        headers: {
+            'Origin': 'https://www.secaibi.com',
+            'Referer': 'https://www.secaibi.com/designtools/media/pages/resizer.html',
+            'Content-Type': 'application/x-www-form-urlencoded'
         },
-        form: {
-            'action': 'compress',
-            'srcid': srcid,
-            'srcname': filename,
-            'param_limit_width': 'origin',
-            'accept_lossy': `${accept_lossy}`,
-            'jpeg_quality': jpeg_quality
-        }
+        data: data
+    }
+}
+
+
+/**
+ * 压缩结果获取请求
+ * @param {*} dstid 
+ * @param {*} filename 
+ * @returns 
+ */
+const compressResultRequestConstruct = (dstid, filename) => {
+    return {
+        method: 'get',
+        maxBodyLength: Infinity,
+        url: `https://www.secaibi.com/designtools/api/image/${dstid}.bin?filename=${filename}`,
+        headers: { 
+            'Referer': 'https://www.secaibi.com/designtools/media/pages/resizer.html', 
+            //'Accept': 'application/octet-stream'
+        },
+        responseType: 'arraybuffer'
     }
 }
 
@@ -94,61 +116,44 @@ const handle = async (ctx) => {
                 }
             })
         }
-        var imgList = ctx.output
+        // 筛选可压缩的图片
+        const compressibleExtensions = ['.jpg', '.jpeg', '.gif', '.png']
+        const imgList = ctx.output.filter(img => compressibleExtensions.indexOf(img.extname) > -1)
         for (var i in imgList) {
-            try {
-                // 获取源图片内容
-                var imgSrc = imgList[i].buffer
-                if ((!imgSrc) && (imgList[i].base64Image)) {
-                    imgSrc = Buffer.from(imgList[i].base64Image, 'base64')
-                }
-
-                // 格式化图片名称
-                var myDate = new Date()
-                var fileName = `${myDate.getFullYear()}${myDate.getMonth() + 1}${myDate.getDate()}${myDate.getHours()}${myDate.getMinutes()}${myDate.getSeconds()}.${imgList[i].extname.slice(1)}`
-                imgList[i].filename = fileName
-
-                // 上传源图片
-                const uploadRequest = uploadRequestConstruct(fileName, imgSrc)
-                const uploadResponse = await ctx.Request.request(uploadRequest)
-                const uploadResponseObject = JSON.parse(uploadResponse)
-                if (uploadResponseObject.success) {
-                    const srcId = uploadResponseObject.id
-                    const compressionRequest = compressionRequestConstruct(srcId, fileName, accept_lossy, jpeg_quality)
-                    const compressionResponse = await ctx.Request.request(compressionRequest)
-                    const compressionResponseObject = JSON.parse(compressionResponse)
-                    if (compressionResponseObject.success) {
-                        const dstId = compressionResponseObject.dstid
-                        let res = await superagent
-                            .get('https://www.secaibi.com/designtools/api/image/' + dstId +'.bin?filename=' + fileName + '&browser=')
-                            .set("Content-Type", "application/json")
-                            .set("accept", "application/octet-stream")
-                            .buffer(true).disableTLSCerts()
-                        imgList[i].buffer = res.body
-                    }
-                    else {
-                        ctx.log.error('提交压缩设置失败!')
-                    }
-                }
-                else {
-                    ctx.log.error('上传源图片' + fileName + '失败, 请检查网络连接!')
-                }
+            // 获取源图片内容
+            var imgSrc = imgList[i].buffer
+            if ((!imgSrc) && (imgList[i].base64Image)) {
+                imgSrc = Buffer.from(imgList[i].base64Image, 'base64')
             }
-            catch (err) {
-                if (err.error === 'Upload failed') {
-                    ctx.emit('notification', {
-                    title: '上传失败!',
-                    body: '请检查你的配置项是否正确'
-                    })
-                }
-                else {
-                    ctx.emit('notification', {
-                    title: '上传失败!',
-                    body: '请检查你的配置项是否正确'
-                    })
-                }
-                throw err
-            }
+            // 格式化图片名称
+            var myDate = new Date()
+            imgList[i].filename = `${myDate.getFullYear()}${myDate.getMonth() + 1}${myDate.getDate()}${myDate.getHours()}${myDate.getMinutes()}${myDate.getSeconds()}.${imgList[i].extname.slice(1)}`
+            // 上传源图片
+            const uploadRequest = uploadRequestConstruct(imgList[i].filename, imgSrc)
+            await ctx.request(uploadRequest).then(async (uploadResponse) => {
+                // 上传压缩参数
+                const compressRequest = compressRequestConstruct(uploadResponse.id, imgList[i].filename, accept_lossy, jpeg_quality)
+                await ctx.request(compressRequest).then(async (compressResponse) => {
+                    if(compressResponse.success && (compressResponse.srcsize > compressResponse.dstsize)){
+                        // 下载压缩后的图片
+                        // ctx.log.info(`https://www.secaibi.com/designtools/api/image/${compressResponse.dstid}.bin?filename=${imgList[i].filename}`)
+                        const compressResultRequest = compressResultRequestConstruct(compressResponse.dstid, imgList[i].filename)
+                        await ctx.request(compressResultRequest).then(async (compressResultResponse) => {
+                            imgList[i].buffer = Buffer.from(compressResultResponse, 'hex')
+                        ctx.log.info(`[Compression] 图片 ${imgList[i].filename} 压缩成功（${compressResponse.srcsizeReadable} --> ${compressResponse.dstsizeReadable}, ↓${compressResponse.reducePercent}%}）`)
+                        }).catch((error) => {
+                            ctx.log.error(`[Compression] 图片压缩失败，${error.message}`)
+                        })
+                    }
+                    else{
+                        ctx.log.info(`[Compression] 图片已压缩至极限`)
+                    }
+                }).catch((error) => {
+                    ctx.log.error(`[Compression] 上传压缩参数失败，${error.message}`)
+                })
+            }).catch((error) => {
+                ctx.log.error(`[Compression] 上传图片 ${imgList[i].filename} 失败，${error.message}`)
+            })
         }
     }  
     return ctx
