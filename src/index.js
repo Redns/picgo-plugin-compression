@@ -1,166 +1,237 @@
+const PLUGIN_NAME = 'picgo-plugin-compression'
+const DEFAULT_CONFIG = {
+  accept_lossy: true,
+  jpeg_quality: '0'
+}
+const COMPRESSIBLE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.gif', '.png'])
+const SECAIBI_ORIGIN = 'https://www.secaibi.com'
+const SECAIBI_REFERER = `${SECAIBI_ORIGIN}/designtools/media/pages/resizer.html`
+
+const getUserConfig = (ctx) => {
+  const userConfig = ctx.getConfig(PLUGIN_NAME) || {}
+  const acceptLossy = typeof userConfig.accept_lossy === 'boolean'
+    ? userConfig.accept_lossy
+    : DEFAULT_CONFIG.accept_lossy
+
+  let jpegQuality = Number.parseInt(userConfig.jpeg_quality, 10)
+  if (Number.isNaN(jpegQuality)) {
+    jpegQuality = Number.parseInt(DEFAULT_CONFIG.jpeg_quality, 10)
+  }
+
+  if (jpegQuality !== 0 && (jpegQuality < 5 || jpegQuality > 100)) {
+    jpegQuality = Number.parseInt(DEFAULT_CONFIG.jpeg_quality, 10)
+    ctx.saveConfig({
+      [PLUGIN_NAME]: {
+        accept_lossy: acceptLossy,
+        jpeg_quality: DEFAULT_CONFIG.jpeg_quality
+      }
+    })
+  }
+
+  return {
+    acceptLossy,
+    jpegQuality
+  }
+}
+
 const pluginConfig = (ctx) => {
-    let userConfig = ctx.getConfig('picgo-plugin-compression')
-    if (!userConfig) {
-        userConfig = {}
+  const userConfig = ctx.getConfig(PLUGIN_NAME) || DEFAULT_CONFIG
+
+  return [
+    {
+      name: 'accept_lossy',
+      type: 'list',
+      alias: '容许质量下降',
+      choices: [true, false],
+      default: userConfig.accept_lossy,
+      message: '',
+      required: false
+    },
+    {
+      name: 'jpeg_quality',
+      type: 'input',
+      alias: '图片质量',
+      default: userConfig.jpeg_quality,
+      message: '图片质量不能为空',
+      required: true
     }
-    const config = [
-        {
-            name: 'accept_lossy',
-            type: 'list',
-            alias: '容许质量下降',
-            choices: [true, false],
-            default: userConfig.accept_lossy || '',
-            message: '',
-            required: false
-        },
-        {
-            name: 'jpeg_quality',
-            type: 'input',
-            alias: '图片质量',
-            default: userConfig.jpeg_quality || '',
-            message: '图片质量不能为空',
-            required: true
-        }
-    ]
-    return config
+  ]
 }
 
-/**
- * 上传待压缩的图片
- * @param {待压缩的图片名称}} filename 
- * @param {待压缩的图片内容(二进制形式)} imgSrc 
- * @returns 
- */
 const uploadRequestConstruct = (filename, imgSrc) => {
-    return {
-        method: 'post',
-        url: `https://www.secaibi.com/designtools/api/image.html?tag=resizer&restful_override_method=PUT&qqfile=${filename}`,
-        headers: {
-            'Origin': 'https://www.secaibi.com',
-            'Content-Type': 'application/octet-stream'
-        },
-        data: imgSrc
-    }
+  return {
+    method: 'post',
+    url: `${SECAIBI_ORIGIN}/designtools/api/image.html`,
+    params: {
+      tag: 'resizer',
+      restful_override_method: 'PUT',
+      qqfile: filename
+    },
+    headers: {
+      Origin: SECAIBI_ORIGIN,
+      'Content-Type': 'application/octet-stream'
+    },
+    data: imgSrc
+  }
 }
 
+const compressRequestConstruct = (id, filename, acceptLossy, jpegQuality) => {
+  const requestBody = new URLSearchParams({
+    action: 'compress',
+    srcid: id,
+    srcname: filename,
+    param_limit_width: 'origin',
+    param_accept_lossy: String(acceptLossy),
+    param_jpeg_quality: String(jpegQuality)
+  }).toString()
 
-/**
- * 发送压缩设置信息
- * @param {源图片ID} srcid 
- * @param {源图片名称} filename 
- * @param {是否启用PNG压缩} accept_lossy 
- * @param {JPG压缩质量} jpeg_quality 
- * @returns 
- */
-const compressRequestConstruct = (id, filename, accept_lossy, jpeg_quality) => {
-    return {
-        method: 'post',
-        url: 'https://www.secaibi.com/designtools/api/resizer-action',
-        headers: {
-            'Origin': 'https://www.secaibi.com',
-            'Referer': 'https://www.secaibi.com/designtools/media/pages/resizer.html',
-            'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        data: `action=compress&srcid=${id}&srcname=${filename}&param_limit_width=origin&param_accept_lossy=${accept_lossy}&param_jpeg_quality=${jpeg_quality}`
-    }
+  return {
+    method: 'post',
+    url: `${SECAIBI_ORIGIN}/designtools/api/resizer-action`,
+    headers: {
+      Origin: SECAIBI_ORIGIN,
+      Referer: SECAIBI_REFERER,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    data: requestBody
+  }
 }
 
-
-/**
- * 压缩结果获取请求
- * @param {*} dstid 
- * @param {*} filename 
- * @returns 
- */
 const compressResultRequestConstruct = (dstid, filename) => {
-    return {
-        method: 'get',
-        maxBodyLength: Infinity,
-        url: `https://www.secaibi.com/designtools/api/image/${dstid}.bin?filename=${filename}`,
-        headers: { 
-            'Referer': 'https://www.secaibi.com/designtools/media/pages/resizer.html', 
-        },
-        responseType: 'arraybuffer'
-    }
+  return {
+    method: 'get',
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
+    url: `${SECAIBI_ORIGIN}/designtools/api/image/${dstid}.bin`,
+    params: {
+      filename
+    },
+    headers: {
+      Referer: SECAIBI_REFERER
+    },
+    responseType: 'arraybuffer'
+  }
 }
 
+const getImageBuffer = (img) => {
+  if (img.buffer) {
+    return img.buffer
+  }
+
+  if (img.base64Image) {
+    return Buffer.from(img.base64Image, 'base64')
+  }
+
+  return null
+}
+
+const buildFilename = (img, index) => {
+  return `${Date.now()}-${index}${img.extname}`
+}
+
+const toBuffer = (payload) => {
+  if (Buffer.isBuffer(payload)) {
+    return payload
+  }
+
+  if (payload instanceof ArrayBuffer) {
+    return Buffer.from(payload)
+  }
+
+  if (ArrayBuffer.isView(payload)) {
+    return Buffer.from(payload.buffer, payload.byteOffset, payload.byteLength)
+  }
+
+  return Buffer.from(payload)
+}
+
+const buildRequestErrorMessage = (error) => {
+  if (!error) {
+    return '未知错误'
+  }
+
+  const responseData = error.response && error.response.data
+  if (typeof responseData === 'string' && responseData) {
+    return `${error.message} - ${responseData}`
+  }
+
+  if (responseData && typeof responseData === 'object') {
+    try {
+      return `${error.message} - ${JSON.stringify(responseData)}`
+    } catch (_) {
+      return error.message
+    }
+  }
+
+  return error.message
+}
+
+const compressImage = async (ctx, img, index, options) => {
+  const imgSrc = getImageBuffer(img)
+  if (!imgSrc) {
+    ctx.log.warn(`[Compression] 图片 ${img.fileName || index + 1} 缺少可用数据，跳过压缩`)
+    return
+  }
+
+  const filename = buildFilename(img, index)
+  img.filename = filename
+
+  try {
+    const uploadResponse = await ctx.request(uploadRequestConstruct(filename, imgSrc))
+    const compressResponse = await ctx.request(
+      compressRequestConstruct(uploadResponse.id, filename, options.acceptLossy, options.jpegQuality)
+    )
+
+    if (!compressResponse.success || compressResponse.srcsize <= compressResponse.dstsize) {
+      ctx.log.info(`[Compression] 图片 ${filename} 已压缩至极限`)
+      return
+    }
+
+    const compressResultResponse = await ctx.request(
+      compressResultRequestConstruct(compressResponse.dstid, filename)
+    )
+
+    img.buffer = toBuffer(compressResultResponse)
+    ctx.log.info(
+      `[Compression] 图片 ${filename} 压缩成功（${compressResponse.srcsizeReadable} --> ${compressResponse.dstsizeReadable}, ↓${compressResponse.reducePercent}%）`
+    )
+  } catch (error) {
+    ctx.log.error(`[Compression] 图片 ${filename} 压缩失败，${buildRequestErrorMessage(error)}`)
+  }
+}
 
 const handle = async (ctx) => {
-    const userConfig = ctx.getConfig('picgo-plugin-compression')
-    if (!userConfig) {
-        throw new Error('请配置相关信息!')
-    }   
-    else {
-        var accept_lossy = userConfig.accept_lossy
-        var jpeg_quality = parseInt(userConfig.jpeg_quality)
+  const userConfig = ctx.getConfig(PLUGIN_NAME)
+  if (!userConfig) {
+    throw new Error('请配置相关信息!')
+  }
 
-        // 检查设置是否符合要求
-        if((jpeg_quality != 0) && ((jpeg_quality < 5) || (jpeg_quality > 100))){
-            jpeg_quality = 0
-            ctx.saveConfig({
-                "picgo-plugin-compression": {
-                    "accept_lossy": accept_lossy,
-                    "jpeg_quality": "0"
-                }
-            })
-        }
-        // 筛选可压缩的图片
-        const compressibleExtensions = ['.jpg', '.jpeg', '.gif', '.png']
-        const imgList = ctx.output.filter(img => compressibleExtensions.indexOf(img.extname) > -1)
-        for (var i in imgList) {
-            // 获取源图片内容
-            var imgSrc = imgList[i].buffer
-            if ((!imgSrc) && (imgList[i].base64Image)) {
-                imgSrc = Buffer.from(imgList[i].base64Image, 'base64')
-            }
-            // 格式化图片名称
-            var myDate = new Date()
-            imgList[i].filename = `${myDate.getFullYear()}${myDate.getMonth() + 1}${myDate.getDate()}${myDate.getHours()}${myDate.getMinutes()}${myDate.getSeconds()}.${imgList[i].extname.slice(1)}`
-            // 上传源图片
-            const uploadRequest = uploadRequestConstruct(imgList[i].filename, imgSrc)
-            await ctx.request(uploadRequest).then(async (uploadResponse) => {
-                // 上传压缩参数
-                const compressRequest = compressRequestConstruct(uploadResponse.id, imgList[i].filename, accept_lossy, jpeg_quality)
-                await ctx.request(compressRequest).then(async (compressResponse) => {
-                    if(compressResponse.success && (compressResponse.srcsize > compressResponse.dstsize)){
-                        // 下载压缩后的图片
-                        const compressResultRequest = compressResultRequestConstruct(compressResponse.dstid, imgList[i].filename)
-                        await ctx.request(compressResultRequest).then(async (compressResultResponse) => {
-                            imgList[i].buffer = Buffer.from(compressResultResponse, 'hex')
-                        ctx.log.info(`[Compression] 图片 ${imgList[i].filename} 压缩成功（${compressResponse.srcsizeReadable} --> ${compressResponse.dstsizeReadable}, ↓${compressResponse.reducePercent}%}）`)
-                        }).catch((error) => {
-                            ctx.log.error(`[Compression] 图片压缩失败，${error.message}`)
-                        })
-                    }
-                    else{
-                        ctx.log.info(`[Compression] 图片已压缩至极限`)
-                    }
-                }).catch((error) => {
-                    ctx.log.error(`[Compression] 上传压缩参数失败，${error.message}`)
-                })
-            }).catch((error) => {
-                ctx.log.error(`[Compression] 上传图片 ${imgList[i].filename} 失败，${error.message}`)
-            })
-        }
-    }  
-    return ctx
+  const options = getUserConfig(ctx)
+  const imgList = ctx.output.filter((img) => COMPRESSIBLE_EXTENSIONS.has(img.extname))
+
+  for (const [index, img] of imgList.entries()) {
+    await compressImage(ctx, img, index, options)
+  }
+
+  return ctx
 }
-
 
 module.exports = (ctx) => {
   const register = () => {
     ctx.log.success('compression加载成功!')
-    ctx.saveConfig({
-        'picgo-plugin-compression': {
-            accept_lossy: true,
-            jpeg_quality: "0"
-        }
-    })
+
+    if (!ctx.getConfig(PLUGIN_NAME)) {
+      ctx.saveConfig({
+        [PLUGIN_NAME]: DEFAULT_CONFIG
+      })
+    }
+
     ctx.helper.beforeUploadPlugins.register('compression', {
-        handle,
-        config: pluginConfig
+      handle,
+      config: pluginConfig
     })
   }
+
   return {
     register,
     config: pluginConfig,
