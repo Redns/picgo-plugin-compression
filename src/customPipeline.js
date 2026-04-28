@@ -5,12 +5,16 @@ const {
 } = require("./constants");
 const { getImageBuffer, parseSizeValue } = require("./utils");
 
+let customPipelineSharpPromise;
+
 const VALID_CONDITION_KEYS = new Set([
     "ext",
+    "height",
     "mode",
     "png_lossy",
     "quality",
     "size",
+    "width",
 ]);
 const VALID_ACTION_KEYS = new Set(["mode", "png_lossy", "quality"]);
 
@@ -32,6 +36,24 @@ const parseRuleToken = (token) => {
         operator: match[2],
         value: match[3].trim(),
     };
+};
+
+const getCustomPipelineSharp = async () => {
+    if (!customPipelineSharpPromise) {
+        customPipelineSharpPromise = import("sharp")
+            .then((sharpModule) => sharpModule.default || sharpModule)
+            .catch((error) => {
+                customPipelineSharpPromise = null;
+                throw error;
+            });
+    }
+
+    return customPipelineSharpPromise;
+};
+
+const parsePixelValue = (value) => {
+    const pixels = Number.parseInt(String(value).trim(), 10);
+    return Number.isNaN(pixels) ? Number.NaN : pixels;
 };
 
 const validateConditionToken = (token) => {
@@ -59,6 +81,13 @@ const validateConditionToken = (token) => {
 
     if (token.key === "size" && Number.isNaN(parseSizeValue(token.value))) {
         return `invalid size value: ${token.value}`;
+    }
+
+    if (
+        ["width", "height"].includes(token.key) &&
+        Number.isNaN(parsePixelValue(token.value))
+    ) {
+        return `invalid ${token.key} value: ${token.value}`;
     }
 
     if (
@@ -217,7 +246,42 @@ const matchTextCondition = (actual, operator, value) => {
     return operator === "!=" ? !matched : matched;
 };
 
-const matchRuleCondition = (condition, img, options) => {
+const getImageDimensions = async (img) => {
+    if (img.__squeezeDimensions) {
+        return img.__squeezeDimensions;
+    }
+
+    const width = Number.parseInt(img.width, 10);
+    const height = Number.parseInt(img.height, 10);
+    if (!Number.isNaN(width) && !Number.isNaN(height) && width > 0 && height > 0) {
+        img.__squeezeDimensions = { width, height };
+        return img.__squeezeDimensions;
+    }
+
+    const imgSrc = getImageBuffer(img);
+    if (!imgSrc) {
+        return null;
+    }
+
+    try {
+        const sharp = await getCustomPipelineSharp();
+        const extname = String(img.extname || "").toLowerCase();
+        const metadata = await sharp(imgSrc, {
+            animated: extname === ".gif" || extname === ".webp",
+            limitInputPixels: false,
+        }).metadata();
+
+        img.__squeezeDimensions = {
+            width: metadata.width || 0,
+            height: metadata.pageHeight || metadata.height || 0,
+        };
+        return img.__squeezeDimensions;
+    } catch (_) {
+        return null;
+    }
+};
+
+const matchRuleCondition = async (condition, img, options) => {
     const imgSrc = getImageBuffer(img);
     const extname = String(img.extname || "")
         .replace(/^\./, "")
@@ -232,6 +296,16 @@ const matchRuleCondition = (condition, img, options) => {
             imgSrc ? imgSrc.length : 0,
             condition.operator,
             parseSizeValue(condition.value),
+        );
+    }
+
+    if (condition.key === "width" || condition.key === "height") {
+        const dimensions = await getImageDimensions(img);
+        const actualValue = dimensions ? dimensions[condition.key] : 0;
+        return compareNumber(
+            actualValue,
+            condition.operator,
+            parsePixelValue(condition.value),
         );
     }
 
@@ -314,12 +388,23 @@ const applyRuleActions = (baseOptions, actions) => {
     );
 };
 
-const resolveCustomOptions = (img, options, customRules) => {
-    const matchedRule = customRules.find((rule) =>
-        rule.conditions.every((condition) =>
-            matchRuleCondition(condition, img, options),
-        ),
-    );
+const resolveCustomOptions = async (img, options, customRules) => {
+    let matchedRule = null;
+
+    for (const rule of customRules) {
+        let isMatched = true;
+        for (const condition of rule.conditions) {
+            if (!(await matchRuleCondition(condition, img, options))) {
+                isMatched = false;
+                break;
+            }
+        }
+
+        if (isMatched) {
+            matchedRule = rule;
+            break;
+        }
+    }
 
     if (!matchedRule) {
         return {

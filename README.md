@@ -66,6 +66,8 @@
 | :--: | :-------: | :-------------------: | :--: | :------------: |
 | 条件 |    ext    | jpg/jpeg/png/gif/webp | 图片拓展名 | ext = jpg\|jpeg\|png |
 |      |   size    |       [Comparer]*B/KB/MB       | 图片尺寸 |     size < 200KB     |
+|      |   width   |      [Comparer]*px      | 图片宽度 |    width >= 1920     |
+|      |  height   |      [Comparer]*px      | 图片高度 |    height >= 1080    |
 | 动作 |   mode    |      local<br />online<br />skip      | 压缩模式（本地/在线/跳过） | mode = local |
 |      |  quality  | 0/5~100 | 图片质量 | quality = 0 |
 |      | png_lossy | true/false | 允许 PNG 质量下降 | png_lossy = false |
@@ -74,6 +76,12 @@
 
 ```bash
 ext=jpg|jpeg,size>=200KB,size<=5MB => mode=online; ext=* => mode=local
+```
+
+宽度 ≥ 1920 或高度 ≥ 1080 的 png 使用本地压缩并允许 png 有损
+
+```bash
+ext=png,width>=1920 => mode=local,png_lossy=true; ext=png,height>=1080 => mode=local,png_lossy=true; ext=* => mode=local
 ```
 
 ## 测试

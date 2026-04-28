@@ -1,6 +1,6 @@
 {
     "name": "picgo-plugin-squeeze",
-    "version": "1.1.10",
+    "version": "1.1.11",
     "description": "基于 sharp 和色彩笔的图片压缩插件，支持本地压缩和在线压缩",
     "main": "src/index.js",
     "publishConfig": {
@@ -36,5 +36,11 @@
         "eslint-plugin-node": "^6.0.1",
         "eslint-plugin-promise": "^3.8.0",
         "eslint-plugin-standard": "^3.1.0"
-    }
+    },
+    "files": [
+        "src",
+        "README.md",
+        "License",
+        "logo.png"
+    ]
 }

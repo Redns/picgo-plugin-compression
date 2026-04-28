@@ -70,7 +70,11 @@ const handleCustomMode = async (ctx, options) => {
     const onlineTasks = [];
 
     for (const [index, img] of ctx.output.entries()) {
-        const customOptions = resolveCustomOptions(img, options, customRules);
+        const customOptions = await resolveCustomOptions(
+            img,
+            options,
+            customRules,
+        );
 
         if (customOptions.compressionMode === "local") {
             localTasks.push({ img, index, options: customOptions });
