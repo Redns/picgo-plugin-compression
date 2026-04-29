@@ -9,6 +9,7 @@ const {
     TOGGLEABLE_COMPRESSION_MODES,
     VALID_COMPRESSION_MODES,
 } = require("./constants");
+const { registerI18n, translate } = require("./i18n");
 
 const omitConfigKeys = (config, keys) => {
     const keySet = new Set(keys);
@@ -164,68 +165,69 @@ const toggleCompressionMode = (ctx) => {
 };
 
 const pluginConfig = (ctx) => {
+    registerI18n(ctx);
     const userConfig = getPluginConfig(ctx) || DEFAULT_CONFIG;
 
     return [
         {
             name: "compression_mode",
             type: "list",
-            alias: "压缩方式",
+            alias: translate(ctx, "SQUEEZE_CONFIG_MODE_ALIAS"),
             choices: ["off", "local", "online", "custom"],
             default:
                 userConfig.compression_mode || DEFAULT_CONFIG.compression_mode,
-            message: "请选择压缩方式（off 为关闭压缩）",
+            message: translate(ctx, "SQUEEZE_CONFIG_MODE_MESSAGE"),
             required: true,
         },
         {
             name: "jpeg_quality",
             type: "input",
-            alias: "图片质量",
+            alias: translate(ctx, "SQUEEZE_CONFIG_QUALITY_ALIAS"),
             default: userConfig.jpeg_quality || DEFAULT_CONFIG.jpeg_quality,
-            message: "0 或 5~100（数字越大图像质量越高）",
+            message: translate(ctx, "SQUEEZE_CONFIG_QUALITY_MESSAGE"),
             required: true,
         },
         {
             name: "accept_lossy",
             type: "list",
-            alias: "允许 png 质量下降",
+            alias: translate(ctx, "SQUEEZE_CONFIG_PNG_LOSSY_ALIAS"),
             choices: [true, false],
             default:
                 typeof userConfig.accept_lossy === "boolean"
                     ? userConfig.accept_lossy
                     : DEFAULT_CONFIG.accept_lossy,
-            message: "开启后将以轻微质量下降获取更大压缩比",
+            message: translate(ctx, "SQUEEZE_CONFIG_PNG_LOSSY_MESSAGE"),
             required: true,
         },
         {
             name: "online_concurrency",
             type: "input",
-            alias: "在线压缩并发数",
+            alias: translate(ctx, "SQUEEZE_CONFIG_CONCURRENCY_ALIAS"),
             default:
                 userConfig.online_concurrency ||
                 DEFAULT_CONFIG.online_concurrency,
-            message: "1~5（数字越大多图在线压缩越快但接口压力越高）",
+            message: translate(ctx, "SQUEEZE_CONFIG_CONCURRENCY_MESSAGE"),
             required: true,
         },
         {
             name: "shortcut_toggle_notify",
             type: "list",
-            alias: "快捷键切换时提醒",
+            alias: translate(ctx, "SQUEEZE_CONFIG_SHORTCUT_NOTIFY_ALIAS"),
             choices: [true, false],
             default:
                 typeof userConfig.shortcut_toggle_notify === "boolean"
                     ? userConfig.shortcut_toggle_notify
                     : DEFAULT_CONFIG.shortcut_toggle_notify,
-            message: "控制快捷键切换压缩模式时是否弹出提醒",
+            message: translate(ctx, "SQUEEZE_CONFIG_SHORTCUT_NOTIFY_MESSAGE"),
             required: true,
         },
         {
             name: "custom_pipeline",
             type: "input",
-            alias: "自定义压缩流程",
+            alias: translate(ctx, "SQUEEZE_CONFIG_PIPELINE_ALIAS"),
             default:
                 userConfig.custom_pipeline || DEFAULT_CONFIG.custom_pipeline,
-            message: "多条规则用英文分号分隔",
+            message: translate(ctx, "SQUEEZE_CONFIG_PIPELINE_MESSAGE"),
             required: false,
         },
     ];

@@ -16,6 +16,7 @@ const {
     parseCustomPipelineDetailed,
     resolveCustomOptions,
 } = require("./customPipeline");
+const { registerI18n, translate, translateMode } = require("./i18n");
 const { compressImageLocally } = require("./localCompress");
 const { compressImageOnline } = require("./onlineCompress");
 const { runWithConcurrency } = require("./utils");
@@ -161,27 +162,34 @@ const notifySuccess = (ctx, guiApi, message, shouldNotify = true) => {
     ctx.log.success(message);
 };
 
-const pluginCommands = (ctx) => [
-    {
-        label: "Toggle squeeze compression",
-        key: "CommandOrControl+Shift+C",
-        name: "toggle",
-        async handle(commandCtx, guiApi) {
-            const runtimeCtx = commandCtx || ctx;
-            const compressionMode = toggleCompressionMode(runtimeCtx);
-            const { shortcutToggleNotify } = getUserConfig(runtimeCtx);
-            notifySuccess(
-                runtimeCtx,
-                guiApi,
-                `squeeze compression mode switched to ${compressionMode}`,
-                shortcutToggleNotify,
-            );
+const pluginCommands = (ctx) => {
+    registerI18n(ctx);
+
+    return [
+        {
+            label: translate(ctx, "SQUEEZE_COMMAND_TOGGLE_LABEL"),
+            key: "CommandOrControl+Shift+C",
+            name: "toggle",
+            async handle(commandCtx, guiApi) {
+                const runtimeCtx = commandCtx || ctx;
+                const compressionMode = toggleCompressionMode(runtimeCtx);
+                const { shortcutToggleNotify } = getUserConfig(runtimeCtx);
+                notifySuccess(
+                    runtimeCtx,
+                    guiApi,
+                    translate(runtimeCtx, "SQUEEZE_NOTIFY_MODE_SWITCHED", {
+                        mode: translateMode(runtimeCtx, compressionMode),
+                    }),
+                    shortcutToggleNotify,
+                );
+            },
         },
-    },
-];
+    ];
+};
 
 module.exports = (ctx) => {
     const register = () => {
+        registerI18n(ctx);
         ctx.log.success("squeeze loaded successfully!");
 
         if (!getPluginConfig(ctx)) {
