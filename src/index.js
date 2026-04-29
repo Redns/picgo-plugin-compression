@@ -21,6 +21,8 @@ const { compressImageLocally } = require("./localCompress");
 const { compressImageOnline } = require("./onlineCompress");
 const { runWithConcurrency } = require("./utils");
 
+const TOGGLE_COMMAND_LABEL = "TOGGLE_MODE";
+
 const getRuntimeCustomRules = (ctx, pipelineText) => {
     const parsed = parseCustomPipelineDetailed(pipelineText);
 
@@ -167,7 +169,7 @@ const pluginCommands = (ctx) => {
 
     return [
         {
-            label: translate(ctx, "SQUEEZE_COMMAND_TOGGLE_LABEL"),
+            label: TOGGLE_COMMAND_LABEL,
             key: "CommandOrControl+Shift+C",
             name: "toggle",
             async handle(commandCtx, guiApi) {
