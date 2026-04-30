@@ -1,4 +1,4 @@
-const { ONLINE_MAX_IMAGE_SIZE } = require("./constants");
+const { LOCAL_QUALITY_DEFAULT, ONLINE_MAX_IMAGE_SIZE } = require("./constants");
 const {
     buildFilename,
     buildRequestErrorMessage,
@@ -69,18 +69,28 @@ const compressResultRequestConstruct = (dstid, filename) => {
 const compressImageOnline = async (ctx, img, index, options) => {
     const imgSrc = getImageBuffer(img);
     const imageLabel = img.fileName || index + 1;
+    const safeOptions = {
+        ...options,
+        acceptLossy: typeof options.acceptLossy === "boolean"
+            ? options.acceptLossy
+            : true,
+        jpegQuality:
+            typeof options.jpegQuality === "number" && Number.isFinite(options.jpegQuality)
+                ? options.jpegQuality
+                : LOCAL_QUALITY_DEFAULT,
+    };
     if (!imgSrc) {
         ctx.log.warn(`Image ${imageLabel} has no available data, skipping compression`);
-        return;
+        return { status: "failed" };
     }
 
     if (imgSrc.length > ONLINE_MAX_IMAGE_SIZE) {
         ctx.log.info(
-            `Image ${imageLabel} exceeds the online compression size limit (${formatFileSize(
+            `Image ${imageLabel} exceeds the secaibi compression size limit (${formatFileSize(
                 imgSrc.length,
             )} > ${formatFileSize(ONLINE_MAX_IMAGE_SIZE)}), skipping compression`,
         );
-        return;
+        return { status: "error" };
     }
 
     const filename = buildFilename(img, index);
@@ -94,19 +104,19 @@ const compressImageOnline = async (ctx, img, index, options) => {
             compressRequestConstruct(
                 uploadResponse.id,
                 filename,
-                options.acceptLossy,
-                options.jpegQuality,
+                safeOptions.acceptLossy,
+                safeOptions.jpegQuality,
             ),
         );
 
         if (!compressResponse.success) {
-            ctx.log.info(`Online compression failed for image ${filename}, keeping the original image`);
-            return;
+            ctx.log.info(`Secaibi compression failed for image ${filename}, keeping the original image`);
+            return { status: "failed" };
         }
 
         if (compressResponse.srcsize <= compressResponse.dstsize) {
             ctx.log.info(`Image ${filename} is already compressed to its limit`);
-            return;
+            return { status: "larger" };
         }
 
         const compressResultResponse = await ctx.request(
@@ -117,15 +127,17 @@ const compressImageOnline = async (ctx, img, index, options) => {
         ctx.log.info(
             buildSuccessMessage(
                 filename,
-                "online",
+                "secaibi",
                 compressResponse.srcsize,
                 compressResponse.dstsize,
             ),
         );
+        return { status: "success" };
     } catch (error) {
         ctx.log.error(
-            `Online compression failed for image ${filename}: ${buildRequestErrorMessage(error)}`,
+            `Secaibi compression failed for image ${filename}: ${buildRequestErrorMessage(error)}`,
         );
+        return { status: "error" };
     }
 };
 

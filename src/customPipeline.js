@@ -1,4 +1,5 @@
 const {
+    LEGACY_COMPRESSION_MODE_ALIASES,
     LOCAL_QUALITY_MAX,
     LOCAL_QUALITY_MIN,
     VALID_RULE_MODES,
@@ -16,7 +17,37 @@ const VALID_CONDITION_KEYS = new Set([
     "size",
     "width",
 ]);
-const VALID_ACTION_KEYS = new Set(["mode", "png_lossy", "quality"]);
+const VALID_ACTION_KEYS = new Set([
+    "convert",
+    "mode",
+    "on_failed",
+    "png_lossy",
+    "quality",
+]);
+
+const VALID_CONVERT_ACTION_VALUES = new Set([
+    "off",
+    "avif",
+    "jpeg",
+    "jpg",
+    "jxl",
+    "png",
+    "webp",
+]);
+
+const normalizeModeValue = (value) => {
+    const normalizedValue = String(value).trim().toLowerCase();
+    return LEGACY_COMPRESSION_MODE_ALIASES[normalizedValue] || normalizedValue;
+};
+
+const normalizeConvertValue = (value) => {
+    const normalizedValue = String(value).trim().toLowerCase();
+    if (normalizedValue === "jpg") {
+        return "jpeg";
+    }
+
+    return normalizedValue;
+};
 
 const parseListValue = (value) => {
     return String(value)
@@ -115,9 +146,20 @@ const validateActionToken = (token) => {
 
     if (
         token.key === "mode" &&
-        !VALID_RULE_MODES.has(token.value.toLowerCase())
+        !VALID_RULE_MODES.has(normalizeModeValue(token.value))
     ) {
         return `invalid mode value: ${token.value}`;
+    }
+
+    if (token.key === "on_failed" && token.value.toLowerCase() !== "break") {
+        return `invalid on_failed value: ${token.value}`;
+    }
+
+    if (
+        token.key === "convert" &&
+        !VALID_CONVERT_ACTION_VALUES.has(token.value.toLowerCase())
+    ) {
+        return `invalid convert value: ${token.value}`;
     }
 
     if (token.key === "quality") {
@@ -313,7 +355,7 @@ const matchRuleCondition = async (condition, img, options) => {
         return matchTextCondition(
             options.compressionMode,
             condition.operator,
-            condition.value,
+            normalizeModeValue(condition.value),
         );
     }
 
@@ -358,10 +400,14 @@ const applyRuleActions = (baseOptions, actions) => {
             }
 
             if (action.key === "mode") {
-                const mode = action.value.toLowerCase();
+                const mode = normalizeModeValue(action.value);
                 if (VALID_RULE_MODES.has(mode)) {
                     result.compressionMode = mode;
                 }
+            }
+
+            if (action.key === "convert") {
+                result.convertTo = normalizeConvertValue(action.value);
             }
 
             if (action.key === "quality") {
@@ -382,16 +428,27 @@ const applyRuleActions = (baseOptions, actions) => {
                 );
             }
 
+            if (action.key === "on_failed") {
+                result.pipelineControl[action.key] = action.value.toLowerCase();
+            }
+
             return result;
         },
-        { ...baseOptions },
+        {
+            ...baseOptions,
+            pipelineControl: {
+                on_failed: "continue",
+            },
+        },
     );
 };
 
-const resolveCustomOptions = async (img, options, customRules) => {
+const findMatchingRule = async (img, options, customRules, startIndex = 0) => {
     let matchedRule = null;
+    let matchedIndex = -1;
 
-    for (const rule of customRules) {
+    for (let index = startIndex; index < customRules.length; index += 1) {
+        const rule = customRules[index];
         let isMatched = true;
         for (const condition of rule.conditions) {
             if (!(await matchRuleCondition(condition, img, options))) {
@@ -402,21 +459,39 @@ const resolveCustomOptions = async (img, options, customRules) => {
 
         if (isMatched) {
             matchedRule = rule;
+            matchedIndex = index;
             break;
         }
     }
 
     if (!matchedRule) {
+        return null;
+    }
+
+    return {
+        index: matchedIndex,
+        rule: matchedRule,
+        options: applyRuleActions(options, matchedRule.actions),
+    };
+};
+
+const resolveCustomOptions = async (img, options, customRules) => {
+    const matchedRule = await findMatchingRule(img, options, customRules);
+    if (!matchedRule) {
         return {
             ...options,
             compressionMode: "local",
+            pipelineControl: {
+                on_failed: "continue",
+            },
         };
     }
 
-    return applyRuleActions(options, matchedRule.actions);
+    return matchedRule.options;
 };
 
 module.exports = {
+    findMatchingRule,
     parseCustomPipeline,
     parseCustomPipelineDetailed,
     resolveCustomOptions,

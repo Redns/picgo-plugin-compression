@@ -1,5 +1,6 @@
 const {
     DEFAULT_CONFIG,
+    LEGACY_COMPRESSION_MODE_ALIASES,
     LEGACY_PLUGIN_NAMES,
     LOCAL_QUALITY_MAX,
     LOCAL_QUALITY_MIN,
@@ -8,7 +9,9 @@ const {
     PLUGIN_NAME,
     TOGGLEABLE_COMPRESSION_MODES,
     VALID_COMPRESSION_MODES,
+    VALID_GLOBAL_CONVERT_TO,
 } = require("./constants");
+const { getTinyPngKeyId } = require("./utils");
 const { registerI18n, translate } = require("./i18n");
 
 const omitConfigKeys = (config, keys) => {
@@ -26,7 +29,12 @@ const omitConfigKeys = (config, keys) => {
 const getPluginConfig = (ctx) => {
     const userConfig = ctx.getConfig(PLUGIN_NAME);
     if (userConfig) {
-        return userConfig;
+        const normalizedConfig = normalizeStoredConfig(userConfig);
+        if (JSON.stringify(normalizedConfig) !== JSON.stringify(userConfig)) {
+            saveNormalizedConfig(ctx, normalizedConfig);
+            ctx.log.info(`Normalized config for ${PLUGIN_NAME}`);
+        }
+        return normalizedConfig;
     }
 
     const legacyPluginName = LEGACY_PLUGIN_NAMES.find((pluginName) =>
@@ -36,7 +44,7 @@ const getPluginConfig = (ctx) => {
         return null;
     }
 
-    const legacyConfig = ctx.getConfig(legacyPluginName);
+    const legacyConfig = normalizeStoredConfig(ctx.getConfig(legacyPluginName));
     const allConfig = ctx.getConfig() || {};
     ctx.saveConfig({
         ...omitConfigKeys(allConfig, LEGACY_PLUGIN_NAMES),
@@ -53,33 +61,156 @@ const saveNormalizedConfig = (ctx, config) => {
     });
 };
 
+const normalizeTinyPngResetSchedule = (schedule, apiKeys, enabled) => {
+    if (!enabled) {
+        return {};
+    }
+
+    const validKeyIds = new Set((apiKeys || []).map(getTinyPngKeyId));
+    const entries = Object.entries(schedule || {}).filter(
+        ([keyId, resetAt]) => {
+            if (!validKeyIds.has(keyId)) {
+                return false;
+            }
+
+            const timestamp = Date.parse(resetAt);
+            return Number.isFinite(timestamp);
+        },
+    );
+
+    return entries.reduce((result, [keyId, resetAt]) => {
+        result[keyId] = resetAt;
+        return result;
+    }, {});
+};
+
+const parseTinyPngApiKeys = (value) => {
+    return String(value || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+};
+
+const getDefaultUserConfig = () => {
+    return {
+        compressionMode: DEFAULT_CONFIG.compression_mode,
+        acceptLossy: DEFAULT_CONFIG.accept_lossy,
+        convertTo: DEFAULT_CONFIG.convert_to || "off",
+        jpegQuality: Number.parseInt(DEFAULT_CONFIG.jpeg_quality, 10),
+        onlineConcurrency: Number.parseInt(
+            DEFAULT_CONFIG.online_concurrency,
+            10,
+        ),
+        shortcutToggleNotify: DEFAULT_CONFIG.shortcut_toggle_notify,
+        tinyPngApiKeys: parseTinyPngApiKeys(DEFAULT_CONFIG.tinypng_api_keys),
+        tinyPngApiKeysRaw: DEFAULT_CONFIG.tinypng_api_keys,
+        tinyPngCacheResetTime: DEFAULT_CONFIG.tinypng_cache_reset_time,
+        tinyPngKeyResetSchedule: normalizeTinyPngResetSchedule(
+            DEFAULT_CONFIG.tinypng_key_reset_schedule,
+            parseTinyPngApiKeys(DEFAULT_CONFIG.tinypng_api_keys),
+            DEFAULT_CONFIG.tinypng_cache_reset_time,
+        ),
+        customPipeline: DEFAULT_CONFIG.custom_pipeline,
+    };
+};
+
+const normalizeConvertTo = (value) => {
+    const normalizedValue = String(value || "")
+        .trim()
+        .toLowerCase();
+
+    if (!normalizedValue) {
+        return DEFAULT_CONFIG.convert_to;
+    }
+
+    if (normalizedValue === "jpg") {
+        return "jpeg";
+    }
+
+    return VALID_GLOBAL_CONVERT_TO.has(normalizedValue)
+        ? normalizedValue
+        : DEFAULT_CONFIG.convert_to;
+};
+
+const normalizeCompressionMode = (value) => {
+    const normalizedValue = String(value || "")
+        .trim()
+        .toLowerCase();
+    return LEGACY_COMPRESSION_MODE_ALIASES[normalizedValue] || normalizedValue;
+};
+
+const migratePipelineModeNames = (pipelineText) => {
+    return String(pipelineText || "").replace(
+        /\bmode\s*([=!]=?)\s*online\b/gi,
+        "mode$1secaibi",
+    );
+};
+
+const normalizeStoredConfig = (config) => {
+    const nextConfig = {
+        ...(config || {}),
+    };
+    const tinyPngApiKeys = parseTinyPngApiKeys(nextConfig.tinypng_api_keys);
+
+    nextConfig.compression_mode = VALID_COMPRESSION_MODES.has(
+        normalizeCompressionMode(nextConfig.compression_mode),
+    )
+        ? normalizeCompressionMode(nextConfig.compression_mode)
+        : DEFAULT_CONFIG.compression_mode;
+    nextConfig.previous_compression_mode = normalizeCompressionMode(
+        nextConfig.previous_compression_mode,
+    );
+    nextConfig.convert_to = normalizeConvertTo(nextConfig.convert_to);
+    nextConfig.tinypng_cache_reset_time =
+        typeof nextConfig.tinypng_cache_reset_time === "boolean"
+            ? nextConfig.tinypng_cache_reset_time
+            : DEFAULT_CONFIG.tinypng_cache_reset_time;
+    nextConfig.tinypng_key_reset_schedule = normalizeTinyPngResetSchedule(
+        nextConfig.tinypng_key_reset_schedule,
+        tinyPngApiKeys,
+        nextConfig.tinypng_cache_reset_time,
+    );
+    nextConfig.custom_pipeline = migratePipelineModeNames(
+        nextConfig.custom_pipeline || DEFAULT_CONFIG.custom_pipeline,
+    );
+
+    return nextConfig;
+};
+
 const getUserConfig = (ctx) => {
+    const defaultUserConfig = getDefaultUserConfig();
     const userConfig = getPluginConfig(ctx) || {};
     const compressionMode = VALID_COMPRESSION_MODES.has(
-        userConfig.compression_mode,
+        normalizeCompressionMode(userConfig.compression_mode),
     )
-        ? userConfig.compression_mode
-        : DEFAULT_CONFIG.compression_mode;
+        ? normalizeCompressionMode(userConfig.compression_mode)
+        : defaultUserConfig.compressionMode;
     const acceptLossy =
         typeof userConfig.accept_lossy === "boolean"
             ? userConfig.accept_lossy
-            : DEFAULT_CONFIG.accept_lossy;
+            : defaultUserConfig.acceptLossy;
     const shortcutToggleNotify =
         typeof userConfig.shortcut_toggle_notify === "boolean"
             ? userConfig.shortcut_toggle_notify
-            : DEFAULT_CONFIG.shortcut_toggle_notify;
+            : defaultUserConfig.shortcutToggleNotify;
+    const tinyPngCacheResetTime =
+        typeof userConfig.tinypng_cache_reset_time === "boolean"
+            ? userConfig.tinypng_cache_reset_time
+            : defaultUserConfig.tinyPngCacheResetTime;
+    const tinyPngApiKeysRaw =
+        typeof userConfig.tinypng_api_keys === "string"
+            ? userConfig.tinypng_api_keys
+            : defaultUserConfig.tinyPngApiKeysRaw;
+    const convertTo = normalizeConvertTo(userConfig.convert_to);
 
     let jpegQuality = Number.parseInt(userConfig.jpeg_quality, 10);
     if (Number.isNaN(jpegQuality)) {
-        jpegQuality = Number.parseInt(DEFAULT_CONFIG.jpeg_quality, 10);
+        jpegQuality = defaultUserConfig.jpegQuality;
     }
 
     let onlineConcurrency = Number.parseInt(userConfig.online_concurrency, 10);
     if (Number.isNaN(onlineConcurrency)) {
-        onlineConcurrency = Number.parseInt(
-            DEFAULT_CONFIG.online_concurrency,
-            10,
-        );
+        onlineConcurrency = defaultUserConfig.onlineConcurrency;
     }
 
     if (
@@ -116,12 +247,40 @@ const getUserConfig = (ctx) => {
     return {
         compressionMode,
         acceptLossy,
+        convertTo,
         jpegQuality,
         onlineConcurrency,
         shortcutToggleNotify,
+        tinyPngApiKeys: parseTinyPngApiKeys(tinyPngApiKeysRaw),
+        tinyPngApiKeysRaw,
+        tinyPngCacheResetTime,
+        tinyPngKeyResetSchedule: normalizeTinyPngResetSchedule(
+            userConfig.tinypng_key_reset_schedule,
+            parseTinyPngApiKeys(tinyPngApiKeysRaw),
+            tinyPngCacheResetTime,
+        ),
         customPipeline:
-            userConfig.custom_pipeline || DEFAULT_CONFIG.custom_pipeline,
+            userConfig.custom_pipeline || defaultUserConfig.customPipeline,
     };
+};
+
+const updateTinyPngKeyResetTime = (ctx, apiKey, resetAt) => {
+    const userConfig = getPluginConfig(ctx) || DEFAULT_CONFIG;
+    const keyId = getTinyPngKeyId(apiKey);
+    const nextSchedule = {
+        ...(userConfig.tinypng_key_reset_schedule || {}),
+    };
+
+    if (resetAt) {
+        nextSchedule[keyId] = resetAt;
+    } else {
+        delete nextSchedule[keyId];
+    }
+
+    saveNormalizedConfig(ctx, {
+        ...userConfig,
+        tinypng_key_reset_schedule: nextSchedule,
+    });
 };
 
 const updateCompressionMode = (ctx, compressionMode) => {
@@ -173,7 +332,7 @@ const pluginConfig = (ctx) => {
             name: "compression_mode",
             type: "list",
             alias: translate(ctx, "SQUEEZE_CONFIG_MODE_ALIAS"),
-            choices: ["off", "local", "online", "custom"],
+            choices: ["off", "local", "secaibi", "tinypng", "custom"],
             default:
                 userConfig.compression_mode || DEFAULT_CONFIG.compression_mode,
             message: translate(ctx, "SQUEEZE_CONFIG_MODE_MESSAGE"),
@@ -200,13 +359,12 @@ const pluginConfig = (ctx) => {
             required: true,
         },
         {
-            name: "online_concurrency",
-            type: "input",
-            alias: translate(ctx, "SQUEEZE_CONFIG_CONCURRENCY_ALIAS"),
-            default:
-                userConfig.online_concurrency ||
-                DEFAULT_CONFIG.online_concurrency,
-            message: translate(ctx, "SQUEEZE_CONFIG_CONCURRENCY_MESSAGE"),
+            name: "convert_to",
+            type: "list",
+            alias: translate(ctx, "SQUEEZE_CONFIG_CONVERT_ALIAS"),
+            choices: ["off", "avif", "webp", "jpeg", "png", "jxl"],
+            default: userConfig.convert_to || DEFAULT_CONFIG.convert_to,
+            message: translate(ctx, "SQUEEZE_CONFIG_CONVERT_MESSAGE"),
             required: true,
         },
         {
@@ -220,6 +378,40 @@ const pluginConfig = (ctx) => {
                     : DEFAULT_CONFIG.shortcut_toggle_notify,
             message: translate(ctx, "SQUEEZE_CONFIG_SHORTCUT_NOTIFY_MESSAGE"),
             required: true,
+        },
+        {
+            name: "tinypng_cache_reset_time",
+            type: "list",
+            alias: translate(ctx, "SQUEEZE_CONFIG_TINYPNG_CACHE_RESET_ALIAS"),
+            choices: [true, false],
+            default:
+                typeof userConfig.tinypng_cache_reset_time === "boolean"
+                    ? userConfig.tinypng_cache_reset_time
+                    : DEFAULT_CONFIG.tinypng_cache_reset_time,
+            message: translate(
+                ctx,
+                "SQUEEZE_CONFIG_TINYPNG_CACHE_RESET_MESSAGE",
+            ),
+            required: true,
+        },
+        {
+            name: "online_concurrency",
+            type: "input",
+            alias: translate(ctx, "SQUEEZE_CONFIG_CONCURRENCY_ALIAS"),
+            default:
+                userConfig.online_concurrency ||
+                DEFAULT_CONFIG.online_concurrency,
+            message: translate(ctx, "SQUEEZE_CONFIG_CONCURRENCY_MESSAGE"),
+            required: false,
+        },
+        {
+            name: "tinypng_api_keys",
+            type: "input",
+            alias: translate(ctx, "SQUEEZE_CONFIG_TINYPNG_KEYS_ALIAS"),
+            default:
+                userConfig.tinypng_api_keys || DEFAULT_CONFIG.tinypng_api_keys,
+            message: translate(ctx, "SQUEEZE_CONFIG_TINYPNG_KEYS_MESSAGE"),
+            required: false,
         },
         {
             name: "custom_pipeline",
@@ -236,7 +428,9 @@ const pluginConfig = (ctx) => {
 module.exports = {
     getPluginConfig,
     getUserConfig,
+    getUserConfigDefault: getDefaultUserConfig,
     pluginConfig,
     toggleCompressionMode,
     updateCompressionMode,
+    updateTinyPngKeyResetTime,
 };

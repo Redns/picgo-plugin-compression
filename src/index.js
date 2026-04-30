@@ -2,23 +2,26 @@ const {
     DEFAULT_CUSTOM_PIPELINE,
     DEFAULT_CONFIG,
     HOOK_NAME,
-    ONLINE_COMPRESSIBLE_EXTENSIONS,
     PLUGIN_NAME,
+    ONLINE_COMPRESSIBLE_EXTENSIONS,
+    TINYPNG_COMPRESSIBLE_EXTENSIONS,
 } = require("./constants");
 const {
     getPluginConfig,
     getUserConfig,
+    getUserConfigDefault,
     pluginConfig,
     toggleCompressionMode,
 } = require("./config");
 const {
+    findMatchingRule,
     parseCustomPipeline,
     parseCustomPipelineDetailed,
-    resolveCustomOptions,
 } = require("./customPipeline");
 const { registerI18n, translate, translateMode } = require("./i18n");
 const { compressImageLocally } = require("./localCompress");
 const { compressImageOnline } = require("./onlineCompress");
+const { compressImageWithTinyPng } = require("./tinypngCompress");
 const { runWithConcurrency } = require("./utils");
 
 const TOGGLE_COMMAND_LABEL = "TOGGLE_MODE";
@@ -67,40 +70,109 @@ const validateCustomPipelineOnLoad = (ctx) => {
     );
 };
 
-const handleCustomMode = async (ctx, options) => {
-    const customRules = getRuntimeCustomRules(ctx, options.customPipeline);
-    const localTasks = [];
-    const onlineTasks = [];
+const compressImageByMode = async (ctx, img, index, options) => {
+    const mode = String(options.compressionMode || "").toLowerCase();
+    if (mode === "off") {
+        return { status: "skipped" };
+    }
 
-    for (const [index, img] of ctx.output.entries()) {
-        const customOptions = await resolveCustomOptions(
+    if (mode === "secaibi") {
+        if (
+            !ONLINE_COMPRESSIBLE_EXTENSIONS.has(
+                String(img.extname || "").toLowerCase(),
+            )
+        ) {
+            ctx.log.warn(
+                `Image ${img.fileName || index + 1} format ${String(
+                    img.extname || "",
+                ).toLowerCase()} is not supported by secaibi mode, skipping compression`,
+            );
+            return { status: "error" };
+        }
+
+        return compressImageOnline(ctx, img, index, options);
+    }
+
+    if (mode === "tinypng") {
+        if (
+            !TINYPNG_COMPRESSIBLE_EXTENSIONS.has(
+                String(img.extname || "").toLowerCase(),
+            )
+        ) {
+            ctx.log.warn(
+                `Image ${img.fileName || index + 1} format ${String(
+                    img.extname || "",
+                ).toLowerCase()} is not supported by TinyPNG mode, skipping compression`,
+            );
+            return { status: "error" };
+        }
+
+        return compressImageWithTinyPng(ctx, img, index, options);
+    }
+
+    return compressImageLocally(ctx, img, index, options);
+};
+
+const handleCustomImage = async (ctx, img, index, options, customRules) => {
+    let nextRuleIndex = 0;
+    let hasMatchedRule = false;
+
+    while (nextRuleIndex < customRules.length) {
+        const matchedRule = await findMatchingRule(
             img,
             options,
             customRules,
+            nextRuleIndex,
         );
 
-        if (customOptions.compressionMode === "local") {
-            localTasks.push({ img, index, options: customOptions });
+        if (!matchedRule) {
+            break;
+        }
+
+        hasMatchedRule = true;
+        const result = await compressImageByMode(
+            ctx,
+            img,
+            index,
+            matchedRule.options,
+        );
+
+        if (
+            result.status === "success" ||
+            result.status === "skipped" ||
+            result.status === "break"
+        ) {
+            return;
+        }
+
+        const pipelineControl = matchedRule.options.pipelineControl || {};
+        if (
+            ["failed", "larger", "error"].includes(result.status) &&
+            pipelineControl.on_failed !== "break"
+        ) {
+            nextRuleIndex = matchedRule.index + 1;
             continue;
         }
 
-        if (customOptions.compressionMode === "online") {
-            if (
-                ONLINE_COMPRESSIBLE_EXTENSIONS.has(
-                    String(img.extname || "").toLowerCase(),
-                )
-            ) {
-                onlineTasks.push({ img, index, options: customOptions });
-            }
-        }
+        return;
     }
 
-    for (const task of localTasks) {
-        await compressImageLocally(ctx, task.img, task.index, task.options);
+    if (!hasMatchedRule) {
+        await compressImageLocally(ctx, img, index, {
+            ...options,
+            compressionMode: "local",
+        });
     }
+};
 
-    await runWithConcurrency(onlineTasks, options.onlineConcurrency, (task) =>
-        compressImageOnline(ctx, task.img, task.index, task.options),
+const handleCustomMode = async (ctx, options) => {
+    const customRules = getRuntimeCustomRules(ctx, options.customPipeline);
+
+    await runWithConcurrency(
+        ctx.output,
+        options.onlineConcurrency,
+        (img, index) =>
+            handleCustomImage(ctx, img, index, options, customRules),
     );
 
     return ctx;
@@ -112,36 +184,67 @@ const handle = async (ctx) => {
         throw new Error("Please configure the plugin first");
     }
 
-    const options = getUserConfig(ctx);
+    let options;
+    try {
+        options = getUserConfig(ctx);
+    } catch (error) {
+        ctx.log.error(
+            `squeeze: failed to read config, using defaults: ${error.message}`,
+        );
+        options = getUserConfigDefault();
+    }
 
-    if (options.compressionMode === "off") {
+    const mode = String(options.compressionMode || "").toLowerCase();
+
+    if (mode === "off") {
         ctx.log.info("squeeze compression mode is off, skipping compression");
         return ctx;
     }
 
-    if (options.compressionMode === "custom") {
-        return handleCustomMode(ctx, options);
-    }
-
-    if (options.compressionMode === "online") {
-        const imgList = ctx.output.filter((img) =>
-            ONLINE_COMPRESSIBLE_EXTENSIONS.has(
-                String(img.extname || "").toLowerCase(),
-            ),
-        );
-        await runWithConcurrency(
-            imgList,
-            options.onlineConcurrency,
-            (img, index) => compressImageOnline(ctx, img, index, options),
-        );
+    if (!Array.isArray(ctx.output) || !ctx.output.length) {
         return ctx;
     }
 
-    for (const [index, img] of ctx.output.entries()) {
-        await compressImageLocally(ctx, img, index, options);
-    }
+    try {
+        if (mode === "custom") {
+            return await handleCustomMode(ctx, options);
+        }
 
-    return ctx;
+        if (mode === "secaibi") {
+            const imgList = ctx.output.filter((img) =>
+                ONLINE_COMPRESSIBLE_EXTENSIONS.has(
+                    String(img.extname || "").toLowerCase(),
+                ),
+            );
+            await runWithConcurrency(
+                imgList,
+                options.onlineConcurrency,
+                (img, index) => compressImageOnline(ctx, img, index, options),
+            );
+            return ctx;
+        }
+
+        if (mode === "tinypng") {
+            await runWithConcurrency(
+                ctx.output,
+                options.onlineConcurrency,
+                (img, index) =>
+                    compressImageWithTinyPng(ctx, img, index, options),
+            );
+            return ctx;
+        }
+
+        for (const [index, img] of ctx.output.entries()) {
+            await compressImageLocally(ctx, img, index, options);
+        }
+
+        return ctx;
+    } catch (error) {
+        ctx.log.error(
+            `squeeze: unexpected error during compression: ${error.message}`,
+        );
+        return ctx;
+    }
 };
 
 const notifySuccess = (ctx, guiApi, message, shouldNotify = true) => {

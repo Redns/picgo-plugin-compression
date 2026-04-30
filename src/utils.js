@@ -1,4 +1,4 @@
-const { MIME_BY_EXTENSION } = require("./constants");
+const { EXTENSION_BY_MIME, MIME_BY_EXTENSION } = require("./constants");
 
 const getImageBuffer = (img) => {
     if (img.buffer) {
@@ -14,6 +14,27 @@ const getImageBuffer = (img) => {
 
 const buildFilename = (img, index) => {
     return `${Date.now()}-${index}${img.extname}`;
+};
+
+const updateImageNameByExtension = (img, nextExtension) => {
+    if (!nextExtension) {
+        return;
+    }
+
+    const currentExtension = String(img.extname || "");
+    if (currentExtension.toLowerCase() === nextExtension.toLowerCase()) {
+        return;
+    }
+
+    img.extname = nextExtension;
+
+    if (img.fileName) {
+        img.fileName = img.fileName.replace(/\.[^.]+$/, nextExtension);
+    }
+
+    if (img.filename) {
+        img.filename = img.filename.replace(/\.[^.]+$/, nextExtension);
+    }
 };
 
 const toBuffer = (payload) => {
@@ -83,6 +104,14 @@ const getMimeFromExtension = (extname) => {
     return MIME_BY_EXTENSION[extname];
 };
 
+const getExtensionFromMime = (mimeType) => {
+    const normalizedMimeType = String(mimeType || "")
+        .split(";")[0]
+        .trim()
+        .toLowerCase();
+    return EXTENSION_BY_MIME[normalizedMimeType] || null;
+};
+
 const formatFileSize = (bytes) => {
     if (bytes < 1024) {
         return `${bytes}B`;
@@ -116,6 +145,18 @@ const buildSuccessMessage = (filename, modeName, sourceSize, targetSize) => {
     )})`;
 };
 
+const getTinyPngKeyId = (apiKey) => {
+    const input = String(apiKey || "");
+    let hash = 2166136261;
+
+    for (let index = 0; index < input.length; index += 1) {
+        hash ^= input.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+
+    return `fnv1a-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+};
+
 const runWithConcurrency = async (items, concurrency, worker) => {
     let nextIndex = 0;
     const workerCount = Math.min(concurrency, items.length);
@@ -135,10 +176,13 @@ module.exports = {
     buildFilename,
     buildRequestErrorMessage,
     buildSuccessMessage,
+    getExtensionFromMime,
     formatFileSize,
     getImageBuffer,
     getMimeFromExtension,
+    getTinyPngKeyId,
     parseSizeValue,
     runWithConcurrency,
     toBuffer,
+    updateImageNameByExtension,
 };

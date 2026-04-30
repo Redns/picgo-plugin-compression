@@ -7,12 +7,17 @@ const {
     buildSuccessMessage,
     getImageBuffer,
     toBuffer,
+    updateImageNameByExtension,
 } = require("./utils");
 
 let localSharpPromise;
 
 const getEffectiveQuality = (jpegQuality) => {
     if (jpegQuality === 0) {
+        return LOCAL_QUALITY_DEFAULT;
+    }
+
+    if (typeof jpegQuality !== "number" || !Number.isFinite(jpegQuality)) {
         return LOCAL_QUALITY_DEFAULT;
     }
 
@@ -136,6 +141,31 @@ const getSharpFormatName = (extname) => {
     return normalizedExtname;
 };
 
+const normalizeOutputExtension = (extname) => {
+    const normalizedExtname = String(extname || "")
+        .replace(/^\./, "")
+        .toLowerCase();
+
+    if (!normalizedExtname || normalizedExtname === "off") {
+        return null;
+    }
+
+    if (normalizedExtname === "jpeg") {
+        return ".jpg";
+    }
+
+    return `.${normalizedExtname}`;
+};
+
+const resolveOutputExtension = (inputExtname, convertTo) => {
+    const normalizedInputExtname = String(inputExtname || "").toLowerCase();
+    if (normalizedInputExtname === ".gif") {
+        return normalizedInputExtname;
+    }
+
+    return normalizeOutputExtension(convertTo) || normalizedInputExtname;
+};
+
 const isSharpBufferFormatSupported = (sharp, extname, direction) => {
     const format = sharp.format[getSharpFormatName(extname)];
 
@@ -239,13 +269,24 @@ const applyLocalCompression = (sharp, pipeline, extname, encodeOptions) => {
 };
 
 const compressImageLocally = async (ctx, img, index, options) => {
+    const safeOptions = {
+        ...(options || {}),
+        jpegQuality:
+            typeof options?.jpegQuality === "number" && Number.isFinite(options.jpegQuality)
+                ? options.jpegQuality
+                : LOCAL_QUALITY_DEFAULT,
+        acceptLossy: typeof options?.acceptLossy === "boolean"
+            ? options.acceptLossy
+            : true,
+    };
     const extname = String(img.extname || "").toLowerCase();
+    const outputExtname = resolveOutputExtension(extname, safeOptions.convertTo);
     const imgSrc = getImageBuffer(img);
     const imageLabel = img.fileName || buildFilename(img, index);
 
     if (!imgSrc) {
         ctx.log.warn(`Image ${imageLabel} has no available data, skipping compression`);
-        return;
+        return { status: "failed" };
     }
 
     try {
@@ -254,14 +295,14 @@ const compressImageLocally = async (ctx, img, index, options) => {
             ctx.log.warn(
                 `Image ${imageLabel} format ${extname} is not supported by the current sharp input capabilities, skipping local compression`,
             );
-            return;
+            return { status: "error" };
         }
 
-        if (!isSharpBufferFormatSupported(sharp, extname, "output")) {
+        if (!isSharpBufferFormatSupported(sharp, outputExtname, "output")) {
             ctx.log.warn(
-                `Image ${imageLabel} format ${extname} is not supported by the current sharp output capabilities, skipping local compression`,
+                `Image ${imageLabel} target format ${outputExtname} is not supported by the current sharp output capabilities, skipping local compression`,
             );
-            return;
+            return { status: "error" };
         }
 
         const metadata = await readMetadataWithoutPixelLimit(
@@ -274,13 +315,13 @@ const compressImageLocally = async (ctx, img, index, options) => {
             ctx.log.warn(
                 `Image ${imageLabel} pixel count ${inputPixels} exceeds sharp's default input limit ${SHARP_LIMIT_INPUT_PIXELS}, skipping local compression`,
             );
-            return;
+            return { status: "error" };
         }
 
         const localEncodeOptions = buildLocalEncodeOptions(
-            extname,
-            options.jpegQuality,
-            options.acceptLossy,
+            outputExtname,
+            safeOptions.jpegQuality,
+            safeOptions.acceptLossy,
         );
         const pipeline = sharp(imgSrc, {
             animated: extname === ".gif" || extname === ".webp",
@@ -288,21 +329,22 @@ const compressImageLocally = async (ctx, img, index, options) => {
         const resultBuffer = await applyLocalCompression(
             sharp,
             pipeline,
-            extname,
+            outputExtname,
             localEncodeOptions,
         ).toBuffer();
 
         if (!resultBuffer) {
             ctx.log.info(`Image ${imageLabel} compression returned no result, keeping the original image`);
-            return;
+            return { status: "failed" };
         }
 
         if (resultBuffer.length >= imgSrc.length) {
             ctx.log.info(`Image ${imageLabel} is already compressed to its limit`);
-            return;
+            return { status: "larger" };
         }
 
         img.buffer = toBuffer(resultBuffer);
+        updateImageNameByExtension(img, outputExtname);
         ctx.log.info(
             buildSuccessMessage(
                 imageLabel,
@@ -311,8 +353,10 @@ const compressImageLocally = async (ctx, img, index, options) => {
                 img.buffer.length,
             ),
         );
+        return { status: "success" };
     } catch (error) {
         ctx.log.error(`Local compression failed for image ${imageLabel}: ${error.message}`);
+        return { status: "error" };
     }
 };
 
