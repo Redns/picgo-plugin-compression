@@ -3,14 +3,23 @@ const {
     SHARP_LIMIT_INPUT_PIXELS,
 } = require("./constants");
 const {
+    applySharpOutputFormat,
+    createSharpPipeline,
+    formatCropOption,
+    formatResizeOption,
+    getSharp,
+    getSharpInputPixelCount,
+    isSharpBufferFormatSupported,
+    readMetadataWithoutPixelLimit,
+    resolveOutputExtension,
+} = require("./sharpTransform");
+const {
     buildFilename,
     buildSuccessMessage,
     getImageBuffer,
     toBuffer,
     updateImageNameByExtension,
 } = require("./utils");
-
-let localSharpPromise;
 
 const getEffectiveQuality = (jpegQuality) => {
     if (jpegQuality === 0) {
@@ -112,82 +121,6 @@ const getGifCompressionOptions = (jpegQuality) => {
     };
 };
 
-const getLocalSharp = async () => {
-    if (!localSharpPromise) {
-        localSharpPromise = import("sharp")
-            .then((sharpModule) => sharpModule.default || sharpModule)
-            .catch((error) => {
-                localSharpPromise = null;
-                throw error;
-            });
-    }
-
-    return localSharpPromise;
-};
-
-const getSharpFormatName = (extname) => {
-    const normalizedExtname = String(extname || "")
-        .replace(/^\./, "")
-        .toLowerCase();
-
-    if (normalizedExtname === "jpg") {
-        return "jpeg";
-    }
-
-    if (normalizedExtname === "avif") {
-        return "heif";
-    }
-
-    return normalizedExtname;
-};
-
-const normalizeOutputExtension = (extname) => {
-    const normalizedExtname = String(extname || "")
-        .replace(/^\./, "")
-        .toLowerCase();
-
-    if (!normalizedExtname || normalizedExtname === "off") {
-        return null;
-    }
-
-    if (normalizedExtname === "jpeg") {
-        return ".jpg";
-    }
-
-    return `.${normalizedExtname}`;
-};
-
-const resolveOutputExtension = (inputExtname, convertTo) => {
-    const normalizedInputExtname = String(inputExtname || "").toLowerCase();
-    if (normalizedInputExtname === ".gif") {
-        return normalizedInputExtname;
-    }
-
-    return normalizeOutputExtension(convertTo) || normalizedInputExtname;
-};
-
-const isSharpBufferFormatSupported = (sharp, extname, direction) => {
-    const format = sharp.format[getSharpFormatName(extname)];
-
-    return Boolean(format && format[direction] && format[direction].buffer);
-};
-
-const getSharpInputPixelCount = (metadata) => {
-    if (!metadata || !metadata.width || !metadata.height) {
-        return 0;
-    }
-
-    const frameHeight = metadata.pageHeight || metadata.height;
-    return metadata.width * frameHeight;
-};
-
-const readMetadataWithoutPixelLimit = (sharp, imgSrc, extname) => {
-    return sharp(imgSrc, {
-        animated: extname === ".gif" || extname === ".webp",
-        limitInputPixels: false,
-    }).metadata();
-};
-
 const buildLocalEncodeOptions = (extname, jpegQuality, acceptLossy) => {
     const quality = getEffectiveQuality(jpegQuality);
 
@@ -244,53 +177,69 @@ const buildLocalEncodeOptions = (extname, jpegQuality, acceptLossy) => {
     return undefined;
 };
 
-const applyLocalCompression = (sharp, pipeline, extname, encodeOptions) => {
-    if (extname === ".jpg" || extname === ".jpeg") {
-        return pipeline.jpeg(encodeOptions);
+const isCropInsideImage = (crop, metadata) => {
+    if (!crop || !metadata || !metadata.width || !metadata.height) {
+        return false;
     }
 
-    if (extname === ".png") {
-        return pipeline.png(encodeOptions);
+    return (
+        crop.left >= 0 &&
+        crop.top >= 0 &&
+        crop.width > 0 &&
+        crop.height > 0 &&
+        crop.left + crop.width <= metadata.width &&
+        crop.top + crop.height <= (metadata.pageHeight || metadata.height)
+    );
+};
+
+const applyLocalSharpOperations = (pipeline, options) => {
+    if (options.crop) {
+        pipeline.extract(options.crop);
     }
 
-    if (extname === ".webp") {
-        return pipeline.webp(encodeOptions);
+    if (options.resize) {
+        pipeline.resize({
+            width: options.resize.width || null,
+            height: options.resize.height || null,
+            fit: options.resize.fit || "inside",
+            withoutEnlargement: Boolean(options.resize.withoutEnlargement),
+            kernel: options.resizeKernel || "lanczos3",
+        });
     }
 
-    if (extname === ".gif") {
-        return pipeline.gif(encodeOptions);
-    }
-
-    if (extname === ".avif") {
-        return pipeline.heif(encodeOptions);
-    }
-
-    return pipeline.toFormat(getSharpFormatName(extname), encodeOptions);
+    return pipeline;
 };
 
 const compressImageLocally = async (ctx, img, index, options) => {
     const safeOptions = {
         ...(options || {}),
         jpegQuality:
-            typeof options?.jpegQuality === "number" && Number.isFinite(options.jpegQuality)
+            typeof options?.jpegQuality === "number" &&
+            Number.isFinite(options.jpegQuality)
                 ? options.jpegQuality
                 : LOCAL_QUALITY_DEFAULT,
-        acceptLossy: typeof options?.acceptLossy === "boolean"
-            ? options.acceptLossy
-            : true,
+        acceptLossy:
+            typeof options?.acceptLossy === "boolean"
+                ? options.acceptLossy
+                : true,
     };
     const extname = String(img.extname || "").toLowerCase();
-    const outputExtname = resolveOutputExtension(extname, safeOptions.convertTo);
+    const outputExtname = resolveOutputExtension(
+        extname,
+        safeOptions.convertTo,
+    );
     const imgSrc = getImageBuffer(img);
     const imageLabel = img.fileName || buildFilename(img, index);
 
     if (!imgSrc) {
-        ctx.log.warn(`Image ${imageLabel} has no available data, skipping compression`);
+        ctx.log.warn(
+            `Image ${imageLabel} has no available data, skipping compression`,
+        );
         return { status: "failed" };
     }
 
     try {
-        const sharp = await getLocalSharp();
+        const sharp = await getSharp();
         if (!isSharpBufferFormatSupported(sharp, extname, "input")) {
             ctx.log.warn(
                 `Image ${imageLabel} format ${extname} is not supported by the current sharp input capabilities, skipping local compression`,
@@ -323,23 +272,69 @@ const compressImageLocally = async (ctx, img, index, options) => {
             safeOptions.jpegQuality,
             safeOptions.acceptLossy,
         );
-        const pipeline = sharp(imgSrc, {
-            animated: extname === ".gif" || extname === ".webp",
-        }).rotate();
-        const resultBuffer = await applyLocalCompression(
-            sharp,
-            pipeline,
-            outputExtname,
-            localEncodeOptions,
-        ).toBuffer();
+        const shouldSkipTransforms =
+            safeOptions.crop && !isCropInsideImage(safeOptions.crop, metadata);
+        const transformOptions = shouldSkipTransforms
+            ? {
+                  ...safeOptions,
+                  crop: null,
+                  resize: null,
+              }
+            : safeOptions;
+
+        if (shouldSkipTransforms) {
+            ctx.log.warn(
+                `Image ${imageLabel} crop area is outside the image bounds, continuing with compression only`,
+            );
+        }
+
+        let resultBuffer;
+        try {
+            if (safeOptions.crop || safeOptions.resize) {
+                ctx.log.info(
+                    `Image ${imageLabel} applying local sharp pipeline (crop=${formatCropOption(
+                        transformOptions.crop,
+                    )}, resize=${formatResizeOption(
+                        transformOptions.resize,
+                        transformOptions.resizeKernel,
+                    )})`,
+                );
+            }
+            const pipeline = applyLocalSharpOperations(
+                createSharpPipeline(sharp, imgSrc, extname),
+                transformOptions,
+            );
+            resultBuffer = await applySharpOutputFormat(
+                pipeline,
+                outputExtname,
+                localEncodeOptions,
+            ).toBuffer();
+        } catch (transformError) {
+            if (!safeOptions.crop && !safeOptions.resize) {
+                throw transformError;
+            }
+
+            ctx.log.warn(
+                `Image ${imageLabel} crop or resize failed, continuing with compression only: ${transformError.message}`,
+            );
+            resultBuffer = await applySharpOutputFormat(
+                createSharpPipeline(sharp, imgSrc, extname),
+                outputExtname,
+                localEncodeOptions,
+            ).toBuffer();
+        }
 
         if (!resultBuffer) {
-            ctx.log.info(`Image ${imageLabel} compression returned no result, keeping the original image`);
+            ctx.log.info(
+                `Image ${imageLabel} compression returned no result, keeping the original image`,
+            );
             return { status: "failed" };
         }
 
         if (resultBuffer.length >= imgSrc.length) {
-            ctx.log.info(`Image ${imageLabel} is already compressed to its limit`);
+            ctx.log.info(
+                `Image ${imageLabel} is already compressed to its limit`,
+            );
             return { status: "larger" };
         }
 
@@ -355,7 +350,9 @@ const compressImageLocally = async (ctx, img, index, options) => {
         );
         return { status: "success" };
     } catch (error) {
-        ctx.log.error(`Local compression failed for image ${imageLabel}: ${error.message}`);
+        ctx.log.error(
+            `Local compression failed for image ${imageLabel}: ${error.message}`,
+        );
         return { status: "error" };
     }
 };

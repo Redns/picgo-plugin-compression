@@ -21,6 +21,11 @@ const {
 const { registerI18n, translate, translateMode } = require("./i18n");
 const { compressImageLocally } = require("./localCompress");
 const { compressImageOnline } = require("./onlineCompress");
+const {
+    applySharpCropResize,
+    canSharpConvertOutput,
+    convertImageWithSharp,
+} = require("./sharpTransform");
 const { compressImageWithTinyPng } = require("./tinypngCompress");
 const { runWithConcurrency } = require("./utils");
 
@@ -76,6 +81,10 @@ const compressImageByMode = async (ctx, img, index, options) => {
         return { status: "skipped" };
     }
 
+    if (mode !== "local") {
+        await applySharpCropResize(ctx, img, index, options);
+    }
+
     if (mode === "secaibi") {
         if (
             !ONLINE_COMPRESSIBLE_EXTENSIONS.has(
@@ -90,7 +99,22 @@ const compressImageByMode = async (ctx, img, index, options) => {
             return { status: "error" };
         }
 
-        return compressImageOnline(ctx, img, index, options);
+        const canUseSharpConvert =
+            options.convertTo === "off" ||
+            (await canSharpConvertOutput(img, options.convertTo));
+        if (!canUseSharpConvert) {
+            ctx.log.warn(
+                `Image ${img.fileName || index + 1} target format ${options.convertTo} is not supported by the current sharp build after secaibi compression`,
+            );
+            return { status: "error" };
+        }
+
+        const result = await compressImageOnline(ctx, img, index, options);
+        if (result.status !== "success" || options.convertTo === "off") {
+            return result;
+        }
+
+        return convertImageWithSharp(ctx, img, index, options.convertTo);
     }
 
     if (mode === "tinypng") {
@@ -219,7 +243,7 @@ const handle = async (ctx) => {
             await runWithConcurrency(
                 imgList,
                 options.onlineConcurrency,
-                (img, index) => compressImageOnline(ctx, img, index, options),
+                (img, index) => compressImageByMode(ctx, img, index, options),
             );
             return ctx;
         }
@@ -228,8 +252,7 @@ const handle = async (ctx) => {
             await runWithConcurrency(
                 ctx.output,
                 options.onlineConcurrency,
-                (img, index) =>
-                    compressImageWithTinyPng(ctx, img, index, options),
+                (img, index) => compressImageByMode(ctx, img, index, options),
             );
             return ctx;
         }

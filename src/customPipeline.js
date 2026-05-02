@@ -18,11 +18,14 @@ const VALID_CONDITION_KEYS = new Set([
     "width",
 ]);
 const VALID_ACTION_KEYS = new Set([
+    "crop",
     "convert",
+    "kernel",
     "mode",
     "on_failed",
     "png_lossy",
     "quality",
+    "resize",
 ]);
 
 const VALID_CONVERT_ACTION_VALUES = new Set([
@@ -33,6 +36,17 @@ const VALID_CONVERT_ACTION_VALUES = new Set([
     "jxl",
     "png",
     "webp",
+]);
+
+const VALID_RESIZE_KERNEL_VALUES = new Set([
+    "nearest",
+    "linear",
+    "cubic",
+    "mitchell",
+    "lanczos2",
+    "lanczos3",
+    "mks2013",
+    "mks2021",
 ]);
 
 const normalizeModeValue = (value) => {
@@ -85,6 +99,77 @@ const getCustomPipelineSharp = async () => {
 const parsePixelValue = (value) => {
     const pixels = Number.parseInt(String(value).trim(), 10);
     return Number.isNaN(pixels) ? Number.NaN : pixels;
+};
+
+const parseCropValue = (value) => {
+    const normalizedValue = String(value).trim();
+    const singleMatch = normalizedValue.match(/^(\d+)$/i);
+    const fullMatch = normalizedValue.match(/^(\d+):(\d+):(\d+):(\d+)$/i);
+    const shortMatch = normalizedValue.match(/^(\d+):(\d+)$/i);
+    if (!singleMatch && !fullMatch && !shortMatch) {
+        return null;
+    }
+
+    const left = fullMatch ? Number.parseInt(fullMatch[1], 10) : 0;
+    const top = fullMatch ? Number.parseInt(fullMatch[2], 10) : 0;
+    const width = Number.parseInt(
+        fullMatch ? fullMatch[3] : singleMatch ? singleMatch[1] : shortMatch[1],
+        10,
+    );
+    const height = Number.parseInt(
+        fullMatch ? fullMatch[4] : singleMatch ? singleMatch[1] : shortMatch[2],
+        10,
+    );
+
+    if (width <= 0 || height <= 0) {
+        return null;
+    }
+
+    return {
+        left,
+        top,
+        width,
+        height,
+    };
+};
+
+const VALID_RESIZE_FIT_VALUES = new Set([
+    "cover",
+    "contain",
+    "fill",
+    "inside",
+    "outside",
+]);
+
+const parseResizeValue = (value) => {
+    const match = String(value)
+        .trim()
+        .match(
+            /^(\d+|auto):(\d+|auto)(?::(cover|contain|fill|inside|outside))?$/i,
+        );
+    if (!match) {
+        return null;
+    }
+
+    const width =
+        match[1].toLowerCase() === "auto"
+            ? null
+            : Number.parseInt(match[1], 10);
+    const height =
+        match[2].toLowerCase() === "auto"
+            ? null
+            : Number.parseInt(match[2], 10);
+    const fit = match[3] ? match[3].toLowerCase() : "inside";
+
+    if ((!width && !height) || !VALID_RESIZE_FIT_VALUES.has(fit)) {
+        return null;
+    }
+
+    return {
+        width,
+        height,
+        fit,
+    };
 };
 
 const validateConditionToken = (token) => {
@@ -156,6 +241,21 @@ const validateActionToken = (token) => {
     }
 
     if (
+        token.key === "kernel" &&
+        !VALID_RESIZE_KERNEL_VALUES.has(token.value.toLowerCase())
+    ) {
+        return `invalid kernel value: ${token.value}`;
+    }
+
+    if (token.key === "crop" && !parseCropValue(token.value)) {
+        return `invalid crop value: ${token.value}`;
+    }
+
+    if (token.key === "resize" && !parseResizeValue(token.value)) {
+        return `invalid resize value: ${token.value}`;
+    }
+
+    if (
         token.key === "convert" &&
         !VALID_CONVERT_ACTION_VALUES.has(token.value.toLowerCase())
     ) {
@@ -209,7 +309,9 @@ const parseCustomPipelineDetailed = (pipelineText) => {
     for (const line of splitRuleLines(pipelineText)) {
         const parts = line.source.split(/\s*=>\s*/);
         if (parts.length !== 2 || !parts[0] || !parts[1]) {
-            errors.push(`rule ${line.index} has invalid syntax: ${line.source}`);
+            errors.push(
+                `rule ${line.index} has invalid syntax: ${line.source}`,
+            );
             continue;
         }
 
@@ -295,7 +397,12 @@ const getImageDimensions = async (img) => {
 
     const width = Number.parseInt(img.width, 10);
     const height = Number.parseInt(img.height, 10);
-    if (!Number.isNaN(width) && !Number.isNaN(height) && width > 0 && height > 0) {
+    if (
+        !Number.isNaN(width) &&
+        !Number.isNaN(height) &&
+        width > 0 &&
+        height > 0
+    ) {
         img.__squeezeDimensions = { width, height };
         return img.__squeezeDimensions;
     }
@@ -408,6 +515,18 @@ const applyRuleActions = (baseOptions, actions) => {
 
             if (action.key === "convert") {
                 result.convertTo = normalizeConvertValue(action.value);
+            }
+
+            if (action.key === "crop") {
+                result.crop = parseCropValue(action.value);
+            }
+
+            if (action.key === "resize") {
+                result.resize = parseResizeValue(action.value);
+            }
+
+            if (action.key === "kernel") {
+                result.resizeKernel = action.value.toLowerCase();
             }
 
             if (action.key === "quality") {

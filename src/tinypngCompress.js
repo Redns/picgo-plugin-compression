@@ -21,6 +21,12 @@ const buildTinyPngAuthHeader = (apiKey) => {
     return `Basic ${Buffer.from(`api:${apiKey}`).toString("base64")}`;
 };
 
+const isJsonContentType = (contentType) => {
+    return String(contentType || "")
+        .toLowerCase()
+        .includes("application/json");
+};
+
 const parseTinyPngError = async (response) => {
     let errorData = null;
     try {
@@ -40,6 +46,28 @@ const parseTinyPngError = async (response) => {
     };
     error.tinyPngError = errorData || null;
     throw error;
+};
+
+const parseTinyPngSuccess = async (response) => {
+    const contentType = response.headers.get("content-type");
+    if (isJsonContentType(contentType)) {
+        const result = await response.json();
+        return {
+            kind: "json",
+            location: response.headers.get("location"),
+            output: result.output || null,
+            buffer: null,
+            mimeType: null,
+        };
+    }
+
+    return {
+        kind: "binary",
+        location: response.headers.get("location"),
+        output: null,
+        buffer: toBuffer(await response.arrayBuffer()),
+        mimeType: contentType,
+    };
 };
 
 const shouldTryNextTinyPngKey = (error) => {
@@ -120,11 +148,7 @@ const shrinkWithTinyPng = async (apiKey, inputBuffer) => {
         await parseTinyPngError(response);
     }
 
-    const result = await response.json();
-    return {
-        location: response.headers.get("location"),
-        output: result.output || null,
-    };
+    return parseTinyPngSuccess(response);
 };
 
 const convertWithTinyPng = async (apiKey, resourceLocation, convertTo) => {
@@ -154,10 +178,10 @@ const convertWithTinyPng = async (apiKey, resourceLocation, convertTo) => {
         await parseTinyPngError(response);
     }
 
-    const result = await response.json();
+    const result = await parseTinyPngSuccess(response);
     return {
-        location: response.headers.get("location") || resourceLocation,
-        output: result.output || null,
+        ...result,
+        location: result.location || resourceLocation,
     };
 };
 
@@ -188,9 +212,8 @@ const compressImageWithTinyPng = async (ctx, img, index, options) => {
         tinyPngApiKeys: Array.isArray(options?.tinyPngApiKeys)
             ? options.tinyPngApiKeys
             : [],
-        convertTo: typeof options?.convertTo === "string"
-            ? options.convertTo
-            : "off",
+        convertTo:
+            typeof options?.convertTo === "string" ? options.convertTo : "off",
         tinyPngCacheResetTime: Boolean(options?.tinyPngCacheResetTime),
         tinyPngKeyResetSchedule:
             options && typeof options.tinyPngKeyResetSchedule === "object"
@@ -256,10 +279,16 @@ const compressImageWithTinyPng = async (ctx, img, index, options) => {
                 );
             }
 
-            const downloadResult = await downloadTinyPngResult(
-                apiKey,
-                shrinkResult.location,
-            );
+            const downloadResult =
+                shrinkResult.kind === "binary"
+                    ? {
+                          buffer: shrinkResult.buffer,
+                          mimeType: shrinkResult.mimeType,
+                      }
+                    : await downloadTinyPngResult(
+                          apiKey,
+                          shrinkResult.location,
+                      );
 
             if (!downloadResult.buffer || !downloadResult.buffer.length) {
                 ctx.log.info(
@@ -297,7 +326,10 @@ const compressImageWithTinyPng = async (ctx, img, index, options) => {
             return { status: "success" };
         } catch (error) {
             lastError = error;
-            if (safeOptions.tinyPngCacheResetTime && isTinyPngMonthlyLimitError(error)) {
+            if (
+                safeOptions.tinyPngCacheResetTime &&
+                isTinyPngMonthlyLimitError(error)
+            ) {
                 const resetAt = getNextCalendarMonthStart();
                 updateTinyPngKeyResetTime(ctx, apiKey, resetAt);
                 safeOptions.tinyPngKeyResetSchedule[keyId] = resetAt;

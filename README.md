@@ -9,7 +9,7 @@
 
 现有图像压缩算法可在保证图像质量基本不变的前提下，极大降低图像大小，从而减少存储占用和数据流量传输，对于使用云存储的用户极为重要。目前 [PicGo](https://picgo.app/) 图像压缩插件大致分为本地压缩和在线压缩两类
 
-- `本地压缩`：通过本地 npm 包实现图片压缩
+- `本地压缩`：通过本地 npm 包实现图像压缩
 - `在线压缩`：将图像上传至云端图像压缩 API 实现
 
 本插件同时支持上述两种方式：**本地压缩** 基于 npm 包 [sharp](https://www.npmjs.com/package/sharp) 实现，**在线压缩** 则提供 [色彩笔](https://www.secaibi.com/tools/在线图片压缩/) 和 [TinyPNG](https://tinypng.com/developers) 两种方案
@@ -17,7 +17,7 @@
 ## 特性
 
 -  支持 **本地压缩** 和 **在线压缩**
-   
+
    |          |                           本地压缩                           | 色彩笔 |            TinyPNG             |
    | :------: | :----------------------------------------------------------: | :----: | :----------------------------: |
    | **尺寸限制** | 像素数 ≤ [268402689](https://sharp.pixelplumbing.com/api-constructor/) | ≤ 5MB  |             ≤ 5MB              |
@@ -25,22 +25,42 @@
    | **免注册登陆** | ✔️ | ✔️ | ❌ |
    | **图片质量控制** | ✔️ | ✔️ | ❌ |
    | **PNG 无损压缩** | ✔️ | ✔️ | ❌ |
-   | **图片格式转换** | ✔️ | ❌ | ✔️ |
+   | **图片格式转换** | ✔️ | ✔️ | ✔️ |
    | **JPG/JPEG** | ✔️ | ✔️ | ✔️ |
    | **PNG** | ✔️ | ✔️ | ✔️ |
    | **GIF** | ✔️ | ✔️ | ❌ |
    | **WebP** | ✔️ | ❌ | ✔️ |
    | **AVIF** | ✔️ | ❌ | ✔️ |
-   
-- 支持 PNG 无损压缩和图像质量控制
 
-- 支持压缩变大时自动保留原图
+   > [1] TinyPNG 超过 500 张图片需购买额度
 
-- 支持 TinyPNG 添加多个 Key，额度用尽时自动切换 Api Key
+-  支持 **图像裁剪、缩放** 和 **输出格式转换**，其中输出转换格式支持的图像类型如下
 
-- 支持 **自定义压缩规则**
+   |          | JPEG | PNG  | WebP | AVIF | JXL  |
+   | :------: | :--: | :--: | :--: | :--: | :--: |
+   | 本地压缩 |  ✔️   |  ✔️   |  ✔️   |  ✔️   |  ❌   |
+   |  色彩笔  |  ✔️   |  ✔️   |  ✔️   |  ✔️   |  ❌   |
+   | TinyPNG  |  ✔️   |  ✔️   |  ✔️   |  ✔️   |  ✔️   |
 
-- 支持 **临时关闭压缩**，无需禁用插件或重启 PicGo
+   > [1] 色彩笔本身不具备图片格式转换功能，该功能由 sharp 实现
+
+-  支持 **PNG 无损压缩** 和 **图像质量控制**
+
+-  支持压缩变大时自动保留原图
+
+-  支持 TinyPNG 添加多个 Key，额度用尽时自动切换 Api Key
+
+-  支持 **自定义压缩规则**
+
+-  支持 **临时关闭压缩**，无需禁用插件或重启 PicGo
+
+## 处理流程
+
+本插件处理流程可分为 **裁剪、缩放、压缩和格式转换** 四部分，不同压缩模式下的处理流程如下图所示
+
+![处理流程](https://image.krins.cloud/29b08ac3bc83efcf6a2f4dbb727f8f19.svg)
+
+灰色模块代表 sharp 库处理，米色模块代表由色彩笔 API 处理，绿色模块代表由 TinyPNG API 处理。需要注意的是，**裁剪和缩放仅在 custom 压缩模式下支持**
 
 ## 配置
 
@@ -79,11 +99,11 @@
 
 - `=>` 左右两侧空格不影响解析，多条规则通过英文分号分隔
 
-- 压缩成功后流程结束；压缩失败、缺少必要配置、超过压缩模式限制、接口报错或压缩后体积变大时，**默认继续匹配后续规则**，仅当显式设置 `on_failed=break` 时才会结束匹配并返回原图。举例如下，假设自定义 2 条规则 Rule1、Rule2
+- 压缩成功后流程结束；压缩失败、缺少必要配置、超过压缩模式限制、接口报错或压缩后体积变大时，**默认继续匹配后续规则**，仅当显式设置 `on_failed=break` 时才会结束匹配并输出原图。举例如下，假设自定义 2 条规则 Rule1、Rule2
 
   ![自定义匹配流程](https://image.krins.cloud/0cec4d55ab634bddcbfe7c9b8b09d476.svg)
 
-  - （a）中输入图像匹配 Rule1 并且压缩成功，直接返回压缩图像
+  - （a）中输入图像匹配 Rule1 并且压缩成功，直接输出压缩图像
   - （b）中输入图像匹配 Rule1 但压缩失败，由于 Rule1 动作中未设置 on_failed 或设置为 continue，继续匹配 Rule2 并输出压缩图像
   - （c）中输入图像匹配 Rule1 但压缩失败，由于 Rule1 动作中设置 on_failed 为 break，停止匹配并输出原始输入图像
 
@@ -94,14 +114,50 @@
 |      |   参数    |       参数范围        | 描述 |      示例      |
 | :--: | :-------: | :-------------------: | :--: | :------------: |
 | 条件 |    ext    | 任意拓展名（不带 .） | 图片拓展名<br />匹配多个拓展名时通过\|分隔 | ext = jpg\|jpeg\|png |
-|      |   size    |       [Comparer]*B/KB/MB       | 图片尺寸 |     size < 200KB     |
-|      |   width   |      [Comparer]*px      | 图片宽度 |    width >= 1920     |
-|      |  height   |      [Comparer]*px      | 图片高度 |    height >= 1080    |
+|      |   size    |       [comparer]*B/KB/MB       | 图片尺寸 |     size < 200KB     |
+|      |   width   |      [comparer]*      | 图片宽度（px） |    width >= 1920     |
+|      |  height   |      [comparer]*      | 图片高度（px） |    height >= 1080    |
 | 动作 |   mode    |      off<br />local<br />secaibi<br />tinypng      | 压缩模式（关闭/本地/色彩笔/TinyPNG） | mode = local |
-|      |  convert  | off/avif/jpeg/jxl/png/webp | 临时转换输出格式，仅对当前规则生效<br />任何 gif 输入都会忽略转换 | convert = webp |
+|      |   crop    | width<br />width:height<br />left​\:top:width:height | 1 个数字表示输出图像的宽度和高度<br />2 个数字默认 left=0, top=0 | crop = 10:20:800:600 |
+|      |  resize   | width:height[:fit] | 1.`width` 或 `height` 可写 `auto`，根据裁剪后图像比例自动计算另一边<br />2.`fit` 支持 `cover/contain/fill/inside/outside`<br />3.禁止放大小图 | resize = 1920:1080:inside |
+|      |  kernel   | nearest<br />linear<br />cubic<br />mitchell<br />lanczos2<br />lanczos3<br />mks2013<br />mks2021 | 缩放插值模式，仅在设置了 `resize` 时生效（默认 `lanczos3`） | kernel = lanczos3 |
+|      |  convert  | off/avif/jpeg/jxl/png/webp | 图像输出格式<br />任何 gif 输入都会忽略转换 | convert = webp |
 |      |  quality  | 0~100 | 图片质量 | quality = 0 |
 |      | png_lossy | true/false | 允许 PNG 质量下降 | png_lossy = false |
-|      | on_failed | continue/break | 压缩失败、缺少必要配置、超过在线模式限制、接口报错或压缩后体积变大时的动作，continue 表示继续匹配下一规则，break 表示直接结束并返回原图；未配置时默认 continue | on_failed = break |
+|      | on_failed | break | 压缩失败、缺少必要配置、超过在线模式限制、接口报错或压缩后体积变大时直接结束并返回原图；未配置时默认继续匹配下一条规则 | on_failed = break |
+
+#### 图像裁剪
+
+以如下 webp 图像为例，展示图像裁剪的实际效果
+
+|          |                           原始图像                           |                          crop=2048                           |                        crop=2048:1536                        |                   crop=1024:768:2048:1536                    |
+| :------: | :----------------------------------------------------------: | :----------------------------------------------------------: | :----------------------------------------------------------: | :----------------------------------------------------------: |
+| 输出尺寸 |                          4096×3072                           |                          2048×2048                           |                          2048×1536                           |                          2048×1536                           |
+|   图像   | ![412fb6723b89827896d344e180b4fd8a](https://image.krins.cloud/e29dcd3b6eae6adac5b01fea9e12afb2.webp) | ![](https://image.krins.cloud/6acf3938e7441d374440929bdbd04f12.webp) | ![412fb6723b89827896d344e180b4fd8a](https://image.krins.cloud/8c8b132412ac983d31cf6ee7385681e6.webp) | ![412fb6723b89827896d344e180b4fd8a](https://image.krins.cloud/c4c5038ad5359227ecd20f7bd875cc82.webp) |
+
+#### 图像缩放
+
+图像缩放包含 **尺寸、缩放模式和插值模式** 三个配置项
+
+- `尺寸`：缩放后图像的大小，本插件不支持图片放大
+- `缩放模式`：图像如何缩放至目标尺寸
+- `插值模式`：如何从原图中计算缩放后图像的像素值
+
+尺寸设置必须同时指定宽度和高度，给定其中一个时另一个可使用 auto 代替，插件会自动根据原图像宽横比计算另一值。缩放模式支持如下类型
+
+|                            inside                            |                           contain                            |                   cover                    |               fill               |                           outside                            |
+| :----------------------------------------------------------: | :----------------------------------------------------------: | :----------------------------------------: | :------------------------------: | :----------------------------------------------------------: |
+| 在保持宽高比的前提下，把图像缩放到尽可能大，同时保证宽高都小于或等于目标尺寸 | 在保持宽高比的前提下，把图像包含在给定尺寸内，并在需要时用特定像素补充边缘未填充区域 | 保持比例并填满目标框，通常会对原图进行裁剪 | 不保持宽高比，强行拉伸到目标尺寸 | 保持宽高比，至少覆盖目标框<br />可能某一边超过目标尺寸，超出部分丢弃 |
+
+插值模式通过 kernel 参数配置，其决定了缩放后如何计算每个点的像素值，不同插值模式的区别如下
+
+|              nearest               |            linear            |            cubic             |        mitchell        |         lanczos2         |       lanczos3       |   mks2013    |                 mks2021                 |
+| :--------------------------------: | :--------------------------: | :--------------------------: | :--------------------: | :----------------------: | :------------------: | :----------: | :-------------------------------------: |
+| 最近邻<br />速度快但边缘易出现锯齿 | 双线性<br />速度快且比较平滑 | 双三次<br />比 linear 更平滑 | 比较自然，锐化没那么强 | 锐度比 linear/cubic 更好 | 细节和锐度通常最平衡 | 偏抗振铃属性 | mks1023 变体<br />相较 lanczos 更加克制 |
+
+建议默认选择  lanczos3
+
+#### 示例
 
 例如，svg 不压缩，大小在 500KB~5MB 的 jpg/jpeg/png/webp/avif 采用 TinyPNG 压缩，其余均采用本地压缩
 
@@ -113,6 +169,12 @@ ext=svg=>mode=off,convert=off; ext=jpg|jpeg|png|webp|avif,size>=500KB,size<=5MB 
 
 ```bash
 ext=png,width>=1920 => mode=local,png_lossy=true; ext=png,height>=1080 => mode=local,png_lossy=true; ext=* => mode=local
+```
+
+将 4K 大小的 jpg 图像缩放为 1080P 大小，然后使用 TinyPNG 压缩并转换为 webp
+
+```bash
+ext=jpg,width=3840,height=2160 => mode=tinypng,resize=1920:auto:inside,kernel=lanczos3,convert=webp
 ```
 
 jpg/jpeg 优先尝试 TinyPNG 并转换为 webp，若接口报错则继续走本地压缩
@@ -136,10 +198,10 @@ ext=svg=>mode=off,convert=off; ext=png|webp|avif,size>=300KB,size<=5MB => mode=t
 | **本地压缩** | 图像大小 |                            315KB                             |                            305KB                             |                             58KB                             |                            148KB                             |                            259KB                             |
 |              | 压缩比例 |                              0%                              |                            3.17%                             |                            81.59%                            |                            53.02%                            |                            17.78%                            |
 |              | 压缩图像 | ![20260425-bing](https://image.krins.cloud/c88c90a3537ae7cb04f622eb4046a27c.jpg) | ![20260425-bing](https://image.krins.cloud/895633295f02d2eb67bcfab1cd213966.jpg) | ![20260425-bing](https://image.krins.cloud/fc7c3a2e53d87d27a71612cf6207c809.jpg) | ![20260425-bing](https://image.krins.cloud/074623255d5941a70006b982bda32faf.jpg) | ![20260425-bing](https://image.krins.cloud/710d0aa0fdd18a56e1a0c2fdac63ccd7.jpg) |
-|  **色彩笔**  | 图像大小 |                              *                               |                     $\underline{247KB}$                      |                             57KB                             |                            147KB                             |                            257KB                             |
+|  **色彩笔**  | 图像大小 |                              *                               |                       <ins>247KB</ins>                       |                             57KB                             |                            147KB                             |                            257KB                             |
 |              | 压缩比例 |                              *                               |                             22%                              |                             83%                              |                             54%                              |                             19%                              |
 |              | 压缩图像 |                              *                               | ![20260425-bing](https://image.krins.cloud/b61026e1b87545af0352bbf501e8f1ea.jpg) | ![20260425-bing](https://image.krins.cloud/8bb73dcc4c666b424493f8ab479d8cb0.jpg) | ![20260425-bing](https://image.krins.cloud/4cdc3e2ff304b6c60397e02262de86bf.jpg) | ![20260425-bing](https://image.krins.cloud/40322df3cc1850457ecb0840b1b95271.jpg) |
-| **TinyPNG**  | 图像大小 |                              *                               |                          * *235KB* *                           |                              *                               |                              *                               |                              *                               |
+| **TinyPNG**  | 图像大小 |                              *                               |                          **235KB**                           |                              *                               |                              *                               |                              *                               |
 |              | 压缩比例 |                              *                               |                             26%                              |                              *                               |                              *                               |                              *                               |
 |              | 压缩图像 |                              *                               | ![](https://image.krins.cloud/df41f083d87b3b3ebf25d89b684e0c96.jpg) |                              *                               |                              *                               |                              *                               |
 
@@ -150,7 +212,7 @@ ext=svg=>mode=off,convert=off; ext=png|webp|avif,size>=300KB,size<=5MB => mode=t
 | **本地压缩** | 图像大小 |                            2.39MB                            |                            1.70MB                            |                            912KB                             |                            496KB                             |                            496KB                             |                            912KB                             |
 |              | 压缩比例 |                              0%                              |                            28.87%                            |                            62.74%                            |                            79.73%                            |                            79.73%                            |                            62.74%                            |
 |              | 压缩图像 | ![Wallhaven](https://image.krins.cloud/17d4ad565b3662c0b6b5bd3b84019801.png) | ![Wallhaven](https://image.krins.cloud/b46d2ea88c0c522a0c8f5c60cf321584.png) | ![Wallhaven](https://image.krins.cloud/2736b5bfbd2f5bac89da65d74a99610b.png) | ![Wallhaven](https://image.krins.cloud/5ba56591a3acb3a7ab5abcc497380324.png) | ![Wallhaven](https://image.krins.cloud/5ba56591a3acb3a7ab5abcc497380324.png) | ![Wallhaven](https://image.krins.cloud/2736b5bfbd2f5bac89da65d74a99610b.png) |
-|  **色彩笔**  | 图像大小 |                              *                               |                            2.1MB                             |                     $\underline{547KB}$                      |                            547KB                             |                            547KB                             |                            547KB                             |
+|  **色彩笔**  | 图像大小 |                              *                               |                            2.1MB                             |                       <ins>547KB</ins>                       |                            547KB                             |                            547KB                             |                            547KB                             |
 |              | 压缩比例 |                              *                               |                             11%                              |                             78%                              |                             78%                              |                             78%                              |                             78%                              |
 |              | 压缩图像 |                              *                               | ![Wallhaven](https://image.krins.cloud/38f04429a533bfac251d2ff9b9d861f8.png) | ![Wallhaven](https://image.krins.cloud/61d8c529e2bee71bc41910bee235f804.png) | ![Wallhaven](https://image.krins.cloud/61d8c529e2bee71bc41910bee235f804.png) | ![Wallhaven](https://image.krins.cloud/61d8c529e2bee71bc41910bee235f804.png) | ![Wallhaven](https://image.krins.cloud/61d8c529e2bee71bc41910bee235f804.png) |
 | **TinyPNG**  | 图像大小 |                              *                               |                              *                               |                          **543KB**                           |                              *                               |                              *                               |                              *                               |
@@ -161,10 +223,10 @@ ext=svg=>mode=off,convert=off; ext=png|webp|avif,size>=300KB,size<=5MB => mode=t
 
 |              |          |                           原始图像                           |                         图像质量 = 0                         |                        图像质量 = 30                         |                        图像质量 = 60                         |                        图像质量 = 90                         |
 | :----------: | :------: | :----------------------------------------------------------: | :----------------------------------------------------------: | :----------------------------------------------------------: | :----------------------------------------------------------: | :----------------------------------------------------------: |
-| **本地压缩** | 图像大小 |                            876KB                             |                     $\underline{771KB}$                      |                            244KB                             |                            367KB                             |                            876KB                             |
+| **本地压缩** | 图像大小 |                            876KB                             |                       <ins>771KB</ins>                       |                            244KB                             |                            367KB                             |                            876KB                             |
 |              | 压缩比例 |                              0%                              |                             12%                              |                             72%                              |                             58%                              |                              0%                              |
 |              | 压缩图像 | ![1777338320759](https://image.krins.cloud/412fb6723b89827896d344e180b4fd8a.webp) | ![1777338320759](https://image.krins.cloud/e29dcd3b6eae6adac5b01fea9e12afb2.webp) | ![1777338320759](https://image.krins.cloud/b8767039b40d638ca3c8a23debdc5453.webp) | ![1777338320759](https://image.krins.cloud/888266b0666f047e7bf96ddd56717a91.webp) | ![1777338320759](https://image.krins.cloud/412fb6723b89827896d344e180b4fd8a.webp) |
-| **TinyPNG**  | 图像大小 |                              *                               |                          * *469KB* *                           |                              *                               |                              *                               |                              *                               |
+| **TinyPNG**  | 图像大小 |                              *                               |                          **469KB**                           |                              *                               |                              *                               |                              *                               |
 |              | 压缩比例 |                              *                               |                             47%                              |                              *                               |                              *                               |                              *                               |
 |              | 压缩图像 |                              *                               | ![](https://image.krins.cloud/7073f5e5b841e5bca530c7c94bf582ff.webp) |                              *                               |                              *                               |                              *                               |
 
@@ -183,10 +245,10 @@ ext=svg=>mode=off,convert=off; ext=png|webp|avif,size>=300KB,size<=5MB => mode=t
 
 |              |          |                           原始图像                           |                         图像质量 = 0                         |                        图像质量 = 30                         |                        图像质量 = 60                         |                        图像质量 = 90                         |
 | :----------: | :------: | :----------------------------------------------------------: | :----------------------------------------------------------: | :----------------------------------------------------------: | :----------------------------------------------------------: | :----------------------------------------------------------: |
-| **本地压缩** | 图像大小 |                            586KB                             |                     $\underline{541KB}$                      |                            240KB                             |                            360KB                             |                            586KB                             |
+| **本地压缩** | 图像大小 |                            586KB                             |                      <ins> 541KB </ins>                      |                            240KB                             |                            360KB                             |                            586KB                             |
 |              | 压缩比例 |                              0%                              |                              8%                              |                             59%                              |                             39%                              |                              0%                              |
 |              | 压缩图像 | ![](https://image.krins.cloud/907ead91340ea7722b0572f7531b0e68.avif) | ![](https://image.krins.cloud/4715e69f858d0be72998b00be96d56ed.avif) | ![](https://image.krins.cloud/92995792b5d5a9ac4a7a962f7f070c4f.avif) | ![](https://image.krins.cloud/67d4fa43c6f45da84393239449359b49.avif) | ![](https://image.krins.cloud/907ead91340ea7722b0572f7531b0e68.avif) |
-| **TinyPNG**  | 图像大小 |                              *                               |                          * *347KB* *                           |                              *                               |                              *                               |                              *                               |
+| **TinyPNG**  | 图像大小 |                              *                               |                          **347KB**                           |                              *                               |                              *                               |                              *                               |
 |              | 压缩比例 |                              *                               |                             41%                              |                              *                               |                              *                               |                              *                               |
 |              | 压缩图像 |                              *                               | ![](https://image.krins.cloud/20f23eca26b2f4f31478373f28fc3049.avif) |                              *                               |                              *                               |                              *                               |
 

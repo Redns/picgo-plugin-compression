@@ -1,7 +1,7 @@
 {
     "name": "picgo-plugin-squeeze",
-    "version": "1.2.0",
-    "description": "基于 sharp 和色彩笔的图片压缩插件，支持本地压缩和在线压缩",
+    "version": "1.3.2",
+    "description": "基于 sharp、TinyPNG 和色彩笔的 PicGo 图片压缩插件，支持本地压缩、在线压缩和自定义压缩规则",
     "main": "src/index.js",
     "publishConfig": {
         "access": "public"
