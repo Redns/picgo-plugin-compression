@@ -79,7 +79,7 @@
    |       快捷键切换时提醒        |                      true/false                      | true | 通过快捷键临时关闭压缩时是否弹出提醒 |
    | 记录 TingPNG API Key 刷新时间 |                      true/false                      | true | 1.当 TinyPNG 返回本月额度已用尽时，插件会记录该 key 下个月可重试时间，后续上传会优先跳过这些暂时无额度的 key<br />2.关闭后会清空本地记录并且每次都直接请求 TinyPNG |
    |        在线压缩并发数         |                         1~5                          | 1 | 多图在线压缩时可同时处理的图片数量 |
-   |       TinyPNG API Keys        |                        string                        | * | 可前往 [TinyPNG](https://tinify.com/dashboard/api) 获取 |
+   |       TinyPNG API Keys        |                        string                        | * | 前往 [TinyPNG](https://tinify.com/dashboard/api) 获取，多个 Key 通过英文逗号分隔 |
    |        自定义压缩流程         |                        string                        | ext =*=> mode = local | 通过图片后缀名、大小、宽高等条件自定义压缩方式、图片质量、失败后是否继续匹配等参数，仅当压缩方式为 custom 时生效，规则模板及示例见下文 |
 
 4. 点击 确定，设置完成

@@ -29,7 +29,7 @@ const {
 const { compressImageWithTinyPng } = require("./tinypngCompress");
 const { runWithConcurrency } = require("./utils");
 
-const TOGGLE_COMMAND_LABEL = "TOGGLE_MODE";
+const TOGGLE_COMMAND_LABEL = "图片压缩";
 
 const getRuntimeCustomRules = (ctx, pipelineText) => {
     const parsed = parseCustomPipelineDetailed(pipelineText);

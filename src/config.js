@@ -406,7 +406,7 @@ const pluginConfig = (ctx) => {
         },
         {
             name: "tinypng_api_keys",
-            type: "input",
+            type: "editor",
             alias: translate(ctx, "SQUEEZE_CONFIG_TINYPNG_KEYS_ALIAS"),
             default:
                 userConfig.tinypng_api_keys || DEFAULT_CONFIG.tinypng_api_keys,
@@ -415,7 +415,7 @@ const pluginConfig = (ctx) => {
         },
         {
             name: "custom_pipeline",
-            type: "input",
+            type: "editor",
             alias: translate(ctx, "SQUEEZE_CONFIG_PIPELINE_ALIAS"),
             default:
                 userConfig.custom_pipeline || DEFAULT_CONFIG.custom_pipeline,
